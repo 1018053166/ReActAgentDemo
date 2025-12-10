@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ReAct 智能助手</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 10px;
+            margin: 0;
+            /* 严格限制在左侧30%区域内 */
+            width: 30vw;
+            max-width: 30vw;
+            overflow-x: hidden;
+            overflow-y: auto;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 100%;
+            margin: 0;
+            padding: 0;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 15px;
+        }
+
+        .header h1 {
+            font-size: 1.4em;
+            margin-bottom: 5px;
+        }
+
+        .header p {
+            font-size: 0.85em;
+            opacity: 0.9;
+        }
+
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 12px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+            margin-bottom: 10px;
+        }
+
+        .input-section {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 10px;
+        }
+
+        #taskInput {
+            flex: 1;
+            min-width: 100%;
+            padding: 8px 10px;
+            font-size: 13px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+
+        #taskInput:focus {
+            border-color: #667eea;
+        }
+
+        .btn {
+            padding: 8px 14px;
+            font-size: 13px;
+            font-weight: 600;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s;
+            min-width: 80px;
+            flex: 1;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #f0f0f0;
+            color: #666;
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: #e0e0e0;
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .examples {
+            margin-bottom: 8px;
+        }
+
+        .examples h3 {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .example-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+
+        .example-tag {
+            padding: 4px 8px;
+            background: #f5f5f5;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .example-tag:hover {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        #output {
+            min-height: 150px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .step {
+            margin-bottom: 8px;
+            padding: 8px;
+            border-radius: 6px;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .step-thought {
+            background: #f0f7ff;
+            border-left: 4px solid #4a90e2;
+        }
+
+        .step-action {
+            background: #fff8e1;
+            border-left: 4px solid #ffa726;
+        }
+
+        .step-observation {
+            background: #f1f8f4;
+            border-left: 4px solid #66bb6a;
+        }
+
+        .step-final {
+            background: #f3e5f5;
+            border-left: 4px solid #ab47bc;
+            font-weight: 500;
+        }
+
+        .step-header {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            margin-bottom: 5px;
+            font-weight: 600;
+            font-size: 12px;
+        }
+
+        .step-icon {
+            width: 16px;
+            height: 16px;
+        }
+
+        .step-content {
+            color: #333;
+            line-height: 1.4;
+            font-size: 12px;
+        }
+
+        .step-meta {
+            margin-top: 5px;
+            padding-top: 5px;
+            border-top: 1px solid rgba(0, 0, 0, 0.1);
+            font-size: 10px;
+            color: #666;
+        }
+
+        .code {
+            background: #f5f5f5;
+            padding: 1px 4px;
+            border-radius: 2px;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+        }
+
+        .loading {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px;
+            color: #666;
+            font-size: 12px;
+        }
+
+        .spinner {
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 30px 10px;
+            color: #999;
+        }
+
+        .empty-state-icon {
+            font-size: 32px;
+            margin-bottom: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 ReAct 智能助手</h1>
+            <p>基于 ReAct 框架的智能助手：支持数学计算、文件操作、文档读取、浏览器自动化</p>
+        </div>
+
+        <div class="card">
+            <div class="examples">
+                <h3>🎭 Playwright 浏览器自动化示例（基础操作）：</h3>
+                <div class="example-tags">
+                    <span class="example-tag" onclick="setTask('访问 https://example.com 并获取页面标题')">🌐 打开网页</span>
+                    <span class="example-tag" onclick="setTask('打开百度首页，搜索 Spring Boot 教程')">🔍 自动搜索</span>
+                    <span class="example-tag" onclick="setTask('访问 https://www.baidu.com 并截图')">📸 网页截图</span>
+                    <span class="example-tag" onclick="setTask('打开 example.com 并使用 JavaScript 获取页面 URL')">⚙️ 执行 JS</span>
+                    <span class="example-tag" onclick="setTask('打开 https://example.com 获取所有可见文本')">📄 提取文本</span>
+                </div>
+            </div>
+            
+            <div class="examples">
+                <h3>🚀 高级浏览器操作（新功能）：</h3>
+                <div class="example-tags">
+                    <span class="example-tag" onclick="setTask('访问 https://www.baidu.com，获取页面的 HTML 内容')">📋 获取 HTML</span>
+                    <span class="example-tag" onclick="setTask('打开 https://example.com，获取浏览器控制台日志')">📊 控制台日志</span>
+                    <span class="example-tag" onclick="setTask('访问淘宝首页，悬停在分类菜单上')">🖱️ 鼠标悬停</span>
+                    <span class="example-tag" onclick="setTask('打开购物网站，选择下拉框中的选项')">📝 选择下拉框</span>
+                    <span class="example-tag" onclick="setTask('访问 https://www.example.com，对整个页面截图')">🖼️ 全页截图</span>
+                </div>
+            </div>
+            
+            <div class="examples">
+                <h3>🎯 综合场景示例：</h3>
+                <div class="example-tags">
+                    <span class="example-tag" onclick="setTask('访问百度，搜索 AI 人工智能，点击第一个搜索结果并获取新页面标题')">🔗 多页面操作</span>
+                    <span class="example-tag" onclick="setTask('打开淘宝首页，搜索 MacBook，截图前 3 个商品')">🛒 电商搜索</span>
+                    <span class="example-tag" onclick="setTask('访问新闻网站，提取首页所有标题并保存为文本')">📰 内容抓取</span>
+                    <span class="example-tag" onclick="setTask('打开 GitHub，搜索 Spring Boot 项目，获取前 5 个项目的星标数')">⭐ 数据采集</span>
+                </div>
+            </div>
+            
+            <div class="examples">
+                <h3>🧮 数学计算示例：</h3>
+                <div class="example-tags">
+                    <span class="example-tag" onclick="setTask('计算 123 加 456')">➕ 加法</span>
+                    <span class="example-tag" onclick="setTask('计算 100 减 37')">➖ 减法</span>
+                    <span class="example-tag" onclick="setTask('计算 15 乘以 8')">✖️ 乘法</span>
+                    <span class="example-tag" onclick="setTask('计算 144 除以 12')">➗ 除法</span>
+                </div>
+            </div>
+            
+            <div class="examples">
+                <h3>📁 文件操作示例：</h3>
+                <div class="example-tags">
+                    <span class="example-tag" onclick="setTask('列出 /tmp 目录下的所有文件')">📂 列出目录</span>
+                    <span class="example-tag" onclick="setTask('在 /tmp 目录创建一个 test.txt 文件，内容为 Hello Playwright MCP')">📝 创建文件</span>
+                    <span class="example-tag" onclick="setTask('读取 /tmp/test.txt 的内容')">📖 读取文件</span>
+                </div>
+            </div>
+
+            <div class="input-section">
+                <input 
+                    type="text" 
+                    id="taskInput" 
+                    placeholder="输入任务，支持浏览器自动化、数学计算、文件操作等"
+                    onkeypress="if(event.key==='Enter') solveTask()"
+                />
+                <button class="btn btn-primary" id="solveBtn" onclick="solveTask()">
+                    开始执行
+                </button>
+                <button class="btn btn-secondary" id="clearBtn" onclick="clearOutput()">
+                    清空
+                </button>
+            </div>
+        </div>
+
+        <div class="card">
+            <div id="output">
+                <div class="empty-state">
+                    <div class="empty-state-icon">💭</div>
+                    <p>输入一个任务，观看 AI 的思考与执行过程</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Spring Boot API 服务地址
+        const API_BASE_URL = 'http://localhost:8080';
+        
+        let eventSource = null;
+
+        function setTask(task) {
+            document.getElementById('taskInput').value = task;
+        }
+
+        function clearOutput() {
+            const output = document.getElementById('output');
+            output.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-state-icon">💭</div>
+                    <p>输入一个任务，观看 AI 的思考与执行过程</p>
+                </div>
+            `;
+        }
+
+        function solveTask() {
+            const task = document.getElementById('taskInput').value.trim();
+            if (!task) {
+                alert('请输入任务');
+                return;
+            }
+
+            // 关闭之前的连接
+            if (eventSource) {
+                eventSource.close();
+            }
+
+            // 清空输出并显示加载状态
+            const output = document.getElementById('output');
+            output.innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <span>AI 正在思考中...</span>
+                </div>
+            `;
+
+            // 禁用按钮
+            const solveBtn = document.getElementById('solveBtn');
+            const taskInput = document.getElementById('taskInput');
+            solveBtn.disabled = true;
+            taskInput.disabled = true;
+            solveBtn.textContent = '执行中...';
+
+            // 建立 SSE 连接 - 使用完整的 API 地址
+            const encodedTask = encodeURIComponent(task);
+            eventSource = new EventSource(`${API_BASE_URL}/react/solve-stream?task=${encodedTask}`);
+
+            // 监听各类事件
+            eventSource.addEventListener('thought', (e) => {
+                const data = JSON.parse(e.data);
+                appendStep('thought', '💭 AI 思考', data.content);
+            });
+
+            eventSource.addEventListener('action', (e) => {
+                const data = JSON.parse(e.data);
+                const toolDesc = getToolDescription(data.toolName, data.toolInput);
+                appendStep('action', '🔧 调用工具', toolDesc);
+            });
+
+            eventSource.addEventListener('final_answer', (e) => {
+                const data = JSON.parse(e.data);
+                appendStep('final', '✅ 最终答案', data.content);
+                
+                // 关闭连接并恢复按钮
+                eventSource.close();
+                solveBtn.disabled = false;
+                taskInput.disabled = false;
+                solveBtn.textContent = '开始执行';
+            });
+
+            eventSource.onerror = (e) => {
+                console.error('SSE 连接错误:', e);
+                eventSource.close();
+                
+                output.innerHTML += `
+                    <div class="step" style="background: #ffebee; border-left: 4px solid #f44336;">
+                        <div class="step-header">
+                            <span>❌ 连接错误</span>
+                        </div>
+                        <div class="step-content">无法连接到服务器，请检查后端服务是否正常运行</div>
+                    </div>
+                `;
+                
+                solveBtn.disabled = false;
+                taskInput.disabled = false;
+                solveBtn.textContent = '开始执行';
+            };
+        }
+
+        function appendStep(type, header, content, meta) {
+            const output = document.getElementById('output');
+            
+            // 移除空状态和加载状态
+            const emptyState = output.querySelector('.empty-state');
+            const loading = output.querySelector('.loading');
+            if (emptyState) emptyState.remove();
+            if (loading) loading.remove();
+
+            const step = document.createElement('div');
+            step.className = `step step-${type}`;
+            
+            step.innerHTML = `
+                <div class="step-header">
+                    <span>${header}</span>
+                </div>
+                <div class="step-content">${content}</div>
+            `;
+            
+            output.appendChild(step);
+            
+            // 滚动到底部
+            output.scrollTop = output.scrollHeight;
+        }
+
+        function getToolDescription(toolName, toolInput) {
+            try {
+                const params = JSON.parse(toolInput);
+                const descriptions = {
+                    // Playwright 浏览器自动化工具（基础）
+                    'navigate': `🌐 打开网页: <code class="code">${params.url}</code> ${params.headless ? '(无头模式)' : '(有头模式)'}`,
+                    'click': `👆 点击元素: <code class="code">${params.selector}</code>`,
+                    'fill': `⌨️ 输入文本: <code class="code">${params.selector}</code> = "${params.text}"`,
+                    'evaluate': `⚙️ 执行 JS: <code class="code">${params.script?.substring(0, 50)}...</code>`,
+                    'closeBrowser': `🚪 关闭浏览器`,
+                    'getPageInfo': `ℹ️ 获取页面信息`,
+                    'analyzePage': `🔍 分析页面结构`,
+                    // Playwright 高级工具
+                    'screenshot': `📸 ${params.fullPage ? '全页截图' : '视口截图'}${params.selector ? ': ' + params.selector : ''}`,
+                    'getConsoleLogs': `📊 获取控制台日志 (类型: ${params.type || 'all'}, 限制: ${params.limit || 50} 条)`,
+                    'hover': `🖱️ 鼠标悬停: <code class="code">${params.selector}</code>`,
+                    'select': `📝 选择下拉框: <code class="code">${params.selector}</code> = "${params.value}"`,
+                    'uploadFile': `📤 上传文件: <code class="code">${params.selector}</code> ← "${params.filePath}"`,
+                    'getVisibleText': `📄 获取可见文本`,
+                    'getVisibleHtml': `📋 获取 HTML${params.cleanHtml ? ' (已清理)' : ''}${params.selector ? ': ' + params.selector : ''}`,
+                    'clickAndSwitchTab': `🪟 点击并切换标签页: <code class="code">${params.selector}</code>`,
+                    'iframeClick': `🔲 iframe 中点击: <code class="code">${params.iframeSelector}</code> → <code class="code">${params.selector}</code>`,
+                    'iframeFill': `🔲 iframe 中填写: <code class="code">${params.iframeSelector}</code> → <code class="code">${params.selector}</code> = "${params.text}"`,
+                    // 旧的工具名（兼容）
+                    'getText': `📄 获取文本: <code class="code">${params.selector}</code>`,
+                    'waitTime': `⏱️ 等待: ${params.milliseconds}ms`,
+                    // 数学工具
+                    'add': `➕ 加法：${params.a} + ${params.b}`,
+                    'subtract': `➖ 减法：${params.a} - ${params.b}`,
+                    'multiply': `✖️ 乘法：${params.a} × ${params.b}`,
+                    'divide': `➗ 除法：${params.a} ÷ ${params.b}`,
+                    // 文件系统工具
+                    'readFile': `📖 读取文本文件: <code class="code">${params.filePath}</code>`,
+                    'writeFile': `📝 写入文件: <code class="code">${params.filePath}</code> (${params.content?.length || 0} 字节)`,
+                    'listFiles': `📂 列出目录: <code class="code">${params.directoryPath}</code> ${params.recursive ? '(递归)' : ''}`,
+                    'createDirectory': `📁 创建目录: <code class="code">${params.directoryPath}</code>`,
+                    'deleteFile': `🗑️ 删除文件: <code class="code">${params.filePath}</code>`,
+                    'copyFile': `📋 复制文件: <code class="code">${params.sourcePath}</code> → <code class="code">${params.targetPath}</code>`,
+                    'moveFile': `📦 移动文件: <code class="code">${params.sourcePath}</code> → <code class="code">${params.targetPath}</code>`,
+                    // Office 文档工具
+                    'readWordDocument': `📘 读取 Word: <code class="code">${params.filePath}</code>`,
+                    'readExcelDocument': `📊 读取 Excel: <code class="code">${params.filePath}</code> (最多 ${params.maxRows || 100} 行)`
+                };
+                return descriptions[toolName] || `${toolName}(${toolInput})`;
+            } catch (e) {
+                return `${toolName}(...)`;
+            }
+        }
+
+        // 页面加载完成后聚焦输入框
+        window.onload = () => {
+            document.getElementById('taskInput').focus();
+        };
+    </script>
+</body>
+</html>

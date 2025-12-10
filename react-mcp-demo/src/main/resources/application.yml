@@ -1,0 +1,26 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: react-mcp-demo
+
+# LangChain4j Qwen 模型配置
+langchain4j:
+  qwen:
+    api-key: ${QWEN_API_KEY:sk-your-qwen-api-key-here}
+    model-name: qwen3-max
+    max-messages: 30  # 降低到 30，避免消息序列过长导致的格式问题
+
+# 远程浏览器配置（用于 Electron BrowserView 集成）
+app:
+  remote-browser:
+    enabled: true
+    host: localhost
+    port: 9222
+
+# 日志配置
+logging:
+  level:
+    com.example.reactmcp: INFO
+    dev.langchain4j: DEBUG

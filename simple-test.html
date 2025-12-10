@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>简单测试页面</title>
+</head>
+<body>
+    <h1>简单输入测试</h1>
+    <input type="text" name="test-input" placeholder="测试输入框">
+    <button onclick="showValue()">显示值</button>
+    <div id="output"></div>
+    
+    <script>
+        function showValue() {
+            const value = document.querySelector('input[name="test-input"]').value;
+            document.getElementById('output').innerHTML = '当前值: ' + value;
+        }
+    </script>
+</body>
+</html>

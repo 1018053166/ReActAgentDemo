@@ -1,0 +1,1249 @@
+const { app, BrowserWindow, ipcMain, BrowserView } = require('electron');
+const path = require('path');
+const { spawn } = require('child_process');
+const isDev = !app.isPackaged;
+const net = require('net');
+const http = require('http');
+const url = require('url');
+
+// 在 app.ready 之前禁用硬件加速以减少 EGL 错误
+app.disableHardwareAcceleration();
+
+// Spring Boot 服务进程
+let springBootProcess = null;
+// Spring Boot 服务端口
+const SPRING_BOOT_PORT = 8080;
+// 服务启动超时时间（毫秒）
+const SERVICE_START_TIMEOUT = 30000;
+// BrowserView 实例
+let browserView = null;
+// 远程控制 HTTP 服务器
+let controlServer = null;
+// 远程控制端口
+const CONTROL_PORT = 9222;
+
+// 主窗口引用
+let mainWindow = null;
+
+// 创建窗口函数
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    minWidth: 1000,
+    minHeight: 700,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  });
+
+  // 加载本地 UI 页面（客户端项目中的 HTML 文件）
+  const localHtmlPath = path.join(__dirname, 'react-ui/public/index.html');
+  console.log('[MAIN] 加载本地 UI 页面:', localHtmlPath);
+  mainWindow.loadFile(localHtmlPath).catch(err => {
+    console.error('[MAIN] 加载本地页面失败:', err);
+  });
+
+  // 创建 BrowserView 用于嵌入浏览器
+  createBrowserView(mainWindow);
+}
+
+// 创建 BrowserView
+function createBrowserView(mainWindow) {
+  browserView = new BrowserView({
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      // 启用 WebView 标签支持
+      webviewTag: true,
+      // 启用 DevTools
+      devTools: true,
+      // 启用 WebGL
+      webSecurity: true,
+      // 启用实验性功能
+      experimentalFeatures: true,
+      // 启用滚动动画
+      scrollBounce: true
+    }
+  });
+  
+  // 先设置 BrowserView
+  mainWindow.setBrowserView(browserView);
+  
+  // 设置 BrowserView 位置和大小（严格三七分布局：左侧30%控制面板，右侧70%浏览器）
+  const resizeBrowserView = () => {
+    const contentSize = mainWindow.getContentSize();
+    const totalWidth = contentSize[0];
+    const totalHeight = contentSize[1];
+    
+    // 严格三七分：左侧30%给控制面板，右侧70%给BrowserView
+    const leftPanelWidth = Math.floor(totalWidth * 0.3);
+    const browserViewX = leftPanelWidth; // BrowserView从左侧30%位置开始
+    const browserViewWidth = totalWidth - leftPanelWidth; // 剩余70%宽度
+    
+    console.log(`[MAIN] 布局调整: 总宽度=${totalWidth}, 左侧面板=${leftPanelWidth}, BrowserView起始X=${browserViewX}, BrowserView宽度=${browserViewWidth}`);
+    
+    browserView.setBounds({
+      x: browserViewX,
+      y: 0,
+      width: browserViewWidth,
+      height: totalHeight
+    });
+    
+    browserView.setAutoResize({ width: true, height: true });
+  };
+  
+  // 初始设置
+  resizeBrowserView();
+  
+  // 监听窗口大小变化
+  mainWindow.on('resize', resizeBrowserView);
+  
+  // 加载默认页面
+  browserView.webContents.loadURL('https://example.com');
+  
+  // 启用开发者工具
+  browserView.webContents.openDevTools({ mode: 'detach' });
+  
+  // 处理新窗口事件
+  browserView.webContents.setWindowOpenHandler(({ url }) => {
+    // 在默认浏览器中打开链接
+    require('electron').shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  
+  // 监听页面加载完成事件
+  browserView.webContents.on('did-finish-load', () => {
+    console.log('[MAIN] BrowserView 页面加载完成');
+  });
+  
+  // 监听页面加载失败事件
+  browserView.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+    console.error(`[MAIN] BrowserView 页面加载失败: ${errorCode} ${errorDescription} ${validatedURL}`);
+  });
+  
+  // 关键：确保 BrowserView 在正确的层级
+  browserView.setBackgroundColor('#FFFFFF');
+}
+
+// 启动远程控制 HTTP 服务器
+function startControlServer() {
+  controlServer = http.createServer((req, res) => {
+    const parsedUrl = url.parse(req.url, true);
+    const pathname = parsedUrl.pathname;
+    
+    // 设置 CORS 头
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    
+    // 处理预检请求
+    if (req.method === 'OPTIONS') {
+      res.writeHead(200);
+      res.end();
+      return;
+    }
+    
+    // 路由处理
+    if (pathname === '/browser/navigate' && req.method === 'GET') {
+      const targetUrl = parsedUrl.query.url;
+      if (!targetUrl) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, message: 'Missing url parameter' }));
+        return;
+      }
+      
+      // 在 BrowserView 中导航到指定 URL
+      if (browserView) {
+        try {
+          browserView.webContents.loadURL(decodeURIComponent(targetUrl));
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ 
+            success: true, 
+            message: 'Navigation started',
+            url: decodeURIComponent(targetUrl)
+          }));
+        } catch (error) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, message: error.message }));
+        }
+      } else {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
+      }
+      return;
+    }
+    
+    // 添加点击路由处理
+    if (pathname === '/browser/click' && req.method === 'GET') {
+      const selector = parsedUrl.query.selector;
+      if (!selector) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, message: 'Missing selector parameter' }));
+        return;
+      }
+      
+      // 在 BrowserView 中执行点击操作
+      if (browserView) {
+        try {
+          // 使用 evaluate 在页面中执行点击操作
+          browserView.webContents.executeJavaScript(`
+            new Promise((resolve, reject) => {
+              const element = document.querySelector('${selector}');
+              if (element) {
+                element.click();
+                resolve({ success: true, message: 'Click executed' });
+              } else {
+                reject(new Error('Element not found: ${selector}'));
+              }
+            });
+          `).then(result => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ 
+              success: true, 
+              message: 'Click executed successfully',
+              result: result
+            }));
+          }).catch(error => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: error.message }));
+          });
+        } catch (error) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, message: error.message }));
+        }
+      } else {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
+      }
+      return;
+    }
+    
+    // 添加输入路由处理
+    if (pathname === '/browser/fill' && req.method === 'GET') {
+      const selector = parsedUrl.query.selector;
+      const text = parsedUrl.query.text;
+      if (!selector || !text) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, message: 'Missing selector or text parameter' }));
+        return;
+      }
+      
+      // 在 BrowserView 中执行输入操作
+      if (browserView) {
+        try {
+          // 使用更智能的输入方法，添加等待和错误处理
+          browserView.webContents.executeJavaScript(`
+            new Promise((resolve, reject) => {
+              try {
+                // 首先等待页面基本加载完成
+                if (document.readyState !== 'complete') {
+                  window.addEventListener('load', () => {
+                    performFill();
+                  });
+                } else {
+                  performFill();
+                }
+                
+                function performFill() {
+                  // 多种策略尝试找到并填充输入框
+                  const strategies = [
+                    // 策略1: 直接使用传入的选择器
+                    (sel) => {
+                      try {
+                        const element = document.querySelector(sel);
+                        if (element) {
+                          console.log('Direct selector strategy success');
+                          return element;
+                        }
+                      } catch (e) {
+                        console.log('Direct selector failed:', e.message);
+                      }
+                      return null;
+                    },
+                    
+                    // 策略2: GitHub 搜索框特殊处理
+                    () => {
+                      const selectors = [
+                        'input[aria-label="Search or jump to..."]',
+                        'input[name="q"]',
+                        'input[type="search"]',
+                        'input[placeholder*="Search"]',
+                        'input[placeholder*="搜索"]',
+                        '#global-search',
+                        'input[aria-label*="search"]',
+                        'input[aria-label*="Search"]'
+                      ];
+                      
+                      for (const sel of selectors) {
+                        try {
+                          const element = document.querySelector(sel);
+                          if (element) {
+                            console.log('GitHub strategy success:', sel);
+                            return element;
+                          }
+                        } catch (e) {
+                          console.log('GitHub selector failed:', sel, e.message);
+                        }
+                      }
+                      return null;
+                    },
+                    
+                    // 策略3: 通用的搜索输入框
+                    () => {
+                      const inputs = Array.from(document.querySelectorAll('input'));
+                      for (const input of inputs) {
+                        try {
+                          const placeholder = input.placeholder?.toLowerCase() || '';
+                          const aria = input.getAttribute('aria-label')?.toLowerCase() || '';
+                          const name = input.name?.toLowerCase() || '';
+                          const id = input.id?.toLowerCase() || '';
+                          
+                          const isSearchBox = placeholder.includes('search') || 
+                                             placeholder.includes('搜索') ||
+                                             aria.includes('search') ||
+                                             aria.includes('搜索') ||
+                                             name.includes('search') ||
+                                             name.includes('q') ||
+                                             id.includes('search') ||
+                                             input.type === 'search';
+                          
+                          if (isSearchBox && !input.disabled && input.offsetParent !== null) {
+                            console.log('Generic search strategy success');
+                            return input;
+                          }
+                        } catch (e) {
+                          console.log('Generic input check failed:', e.message);
+                        }
+                      }
+                      return null;
+                    }
+                  ];
+                  
+                  let element = null;
+                  let strategy = 0;
+                  
+                  // 尝试不同的策略
+                  while (strategy < strategies.length && !element) {
+                    try {
+                      const selectorParam = selector;
+                      // 只有策略1需要传入选择器参数，其他策略不需要
+                      if (strategy === 0) {
+                        element = strategies[strategy](selectorParam);
+                      } else {
+                        element = strategies[strategy]();
+                      }
+                      
+                      if (element) {
+                        console.log('Found element using strategy', strategy + 1);
+                        break;
+                      }
+                    } catch (e) {
+                      console.log('Strategy', strategy + 1, 'failed:', e.message);
+                      strategy++;
+                    }
+                  }
+                  
+                  if (!element) {
+                    reject(new Error('Input element not found using any strategy'));
+                    return;
+                  }
+                  
+                  // 等待元素可见并启用
+                  function waitForElement() {
+                    return new Promise((resolve, reject) => {
+                      const checkElement = () => {
+                        const style = window.getComputedStyle(element);
+                        const rect = element.getBoundingClientRect();
+                        
+                        if (style.display !== 'none' && 
+                            style.visibility !== 'hidden' && 
+                            style.opacity !== '0' &&
+                            rect.width > 0 && 
+                            rect.height > 0 &&
+                            !element.disabled) {
+                          resolve();
+                        } else {
+                          setTimeout(checkElement, 100);
+                        }
+                      };
+                      
+                      checkElement();
+                      
+                      // 超时保护
+                      setTimeout(() => {
+                        reject(new Error('Element not ready within timeout'));
+                      }, 10000);
+                    });
+                  }
+                  
+                  // 执行填充操作
+                  waitForElement().then(() => {
+                    // 模拟真实用户输入
+                    element.focus();
+                    element.select();
+                    
+                    // 清除现有内容
+                    element.value = '';
+                    
+                    // 逐字符输入，模拟真实打字
+                    let index = 0;
+                    const inputText = text;
+                    const inputInterval = setInterval(() => {
+                      if (index < inputText.length) {
+                        element.value += inputText[index];
+                        
+                        // 触发输入事件
+                        element.dispatchEvent(new Event('input', { bubbles: true }));
+                        element.dispatchEvent(new KeyboardEvent('keydown', { key: inputText[index] }));
+                        element.dispatchEvent(new KeyboardEvent('keyup', { key: inputText[index] }));
+                        
+                        index++;
+                      } else {
+                        clearInterval(inputInterval);
+                        
+                        // 触发最终事件
+                        element.dispatchEvent(new Event('input', { bubbles: true }));
+                        element.dispatchEvent(new Event('change', { bubbles: true }));
+                        element.dispatchEvent(new Event('blur', { bubbles: true }));
+                        
+                        resolve({ 
+                          success: true, 
+                          message: 'Fill executed successfully',
+                          element: element.tagName + (element.id ? '#' + element.id : '') + (element.className ? '.' + element.className.split(' ')[0] : '')
+                        });
+                      }
+                    }, 10); // 每10ms输入一个字符
+                    
+                  }).catch(error => {
+                    reject(new Error('Element not ready: ' + error.message));
+                  });
+                }
+              } catch (error) {
+                reject(error);
+              }
+            });
+          `).then(result => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ 
+              success: true, 
+              message: 'Fill executed successfully',
+              result: result
+            }));
+          }).catch(error => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: error.message }));
+          });
+        } catch (error) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, message: error.message }));
+        }
+      } else {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
+      }
+      return;
+    }
+    
+    // 添加获取页面信息路由处理
+    if (pathname === '/browser/getPageInfo' && req.method === 'GET') {
+      // 在 BrowserView 中获取页面信息
+      if (browserView) {
+        try {
+          // 使用 evaluate 在页面中获取页面信息
+          browserView.webContents.executeJavaScript(`
+            new Promise((resolve) => {
+              resolve({
+                url: window.location.href,
+                title: document.title
+              });
+            });
+          `).then(result => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ 
+              success: true, 
+              message: 'Page info retrieved successfully',
+              result: result
+            }));
+          }).catch(error => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: error.message }));
+          });
+        } catch (error) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, message: error.message }));
+        }
+      } else {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
+      }
+      return;
+    }
+    
+    // 添加获取页面HTML路由处理
+    if (pathname === '/browser/getVisibleHtml' && req.method === 'GET') {
+      const selector = parsedUrl.query.selector || 'html';
+      const cleanHtml = parsedUrl.query.cleanHtml === 'true';
+      
+      // 在 BrowserView 中获取页面HTML
+      if (browserView) {
+        try {
+          // 使用 evaluate 在页面中获取HTML内容
+          browserView.webContents.executeJavaScript(`
+            new Promise((resolve, reject) => {
+              try {
+                let container = document.querySelector('${selector}') || document.documentElement;
+                if (!container) {
+                  reject(new Error('Container element not found: ${selector}'));
+                  return;
+                }
+                
+                // 克隆节点以避免修改原始DOM
+                let clone = container.cloneNode(true);
+                
+                // 如果需要清理HTML，则移除script、style等元素
+                if (${cleanHtml}) {
+                  // 移除script标签
+                  clone.querySelectorAll('script').forEach(el => el.remove());
+                  // 移除style标签
+                  clone.querySelectorAll('style').forEach(el => el.remove());
+                  // 移除link标签（通常用于加载CSS）
+                  clone.querySelectorAll('link').forEach(el => el.remove());
+                  // 移除meta标签
+                  clone.querySelectorAll('meta').forEach(el => el.remove());
+                }
+                
+                resolve(clone.outerHTML);
+              } catch (error) {
+                reject(error);
+              }
+            });
+          `).then(html => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ 
+              success: true, 
+              message: 'HTML content retrieved successfully',
+              result: html
+            }));
+          }).catch(error => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: error.message }));
+          });
+        } catch (error) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, message: error.message }));
+        }
+      } else {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
+      }
+      return;
+    }
+    
+    // 添加获取页面可见文本路由处理
+    if (pathname === '/browser/getVisibleText' && req.method === 'GET') {
+      const selector = parsedUrl.query.selector || 'body';
+      
+      // 在 BrowserView 中获取页面可见文本
+      if (browserView) {
+        try {
+          // 使用 evaluate 在页面中获取可见文本内容
+          browserView.webContents.executeJavaScript(`
+            new Promise((resolve, reject) => {
+              try {
+                let container = document.querySelector('${selector}');
+                if (!container) {
+                  // 尝试使用 body 作为容器
+                  if (document.body) {
+                    container = document.body;
+                  } else {
+                    reject(new Error('No suitable container element found'));
+                    return;
+                  }
+                }
+                
+                // 获取所有可见文本
+                function getVisibleText(element) {
+                  let text = '';
+                  
+                  // 如果是文本节点，直接返回文本内容
+                  if (element.nodeType === Node.TEXT_NODE) {
+                    return element.textContent.trim();
+                  }
+                  
+                  // 如果是元素节点，检查是否可见
+                  if (element.nodeType === Node.ELEMENT_NODE) {
+                    // 跳过script和style标签
+                    if (element.tagName === 'SCRIPT' || element.tagName === 'STYLE') {
+                      return '';
+                    }
+                    
+                    // 检查元素是否可见
+                    const style = window.getComputedStyle(element);
+                    if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0') {
+                      // 处理子节点
+                      for (let child of element.childNodes) {
+                        text += getVisibleText(child);
+                      }
+                      
+                      // 在块级元素后添加换行
+                      const display = style.display;
+                      if (display === 'block' || display === 'flex' || display === 'grid' || display === 'list-item') {
+                        text += '\\n';
+                      }
+                    }
+                  }
+                  
+                  return text;
+                }
+                
+                const result = getVisibleText(container);
+                resolve(result.trim());
+              } catch (error) {
+                reject(error);
+              }
+            });
+          `).then(text => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ 
+              success: true, 
+              message: 'Visible text retrieved successfully',
+              result: text
+            }));
+          }).catch(error => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: error.message }));
+          });
+        } catch (error) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, message: error.message }));
+        }
+      } else {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
+      }
+      return;
+    }
+    
+    // 添加执行JavaScript路由处理
+    if (pathname === '/browser/executeJs' && req.method === 'POST') {
+      let body = '';
+      req.on('data', chunk => {
+        body += chunk.toString();
+      });
+      
+      req.on('end', () => {
+        try {
+          const { script } = JSON.parse(body);
+          
+          if (!script) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: 'Script is required' }));
+            return;
+          }
+          
+          // 在 BrowserView 中执行JavaScript
+          if (browserView) {
+            browserView.webContents.executeJavaScript(script)
+              .then(result => {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ 
+                  success: true, 
+                  message: 'JavaScript executed successfully',
+                  result: result
+                }));
+              })
+              .catch(error => {
+                console.error('ExecuteJS Error:', error);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ 
+                  success: false, 
+                  message: error.message,
+                  stack: error.stack,
+                  name: error.name
+                }));
+              });
+          } else {
+            res.writeHead(503, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
+          }
+        } catch (error) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, message: 'Invalid JSON' }));
+        }
+      });
+      return;
+    }
+    
+    // 添加页面分析路由处理
+    if (pathname === '/browser/analyzePage' && req.method === 'GET') {
+      // 在 BrowserView 中分析页面
+      if (browserView) {
+        try {
+          // 使用 evaluate 在页面中执行页面分析
+          browserView.webContents.executeJavaScript(`
+            new Promise((resolve, reject) => {
+              try {
+                const pageInfo = {
+                  url: window.location.href,
+                  title: document.title,
+                  timestamp: new Date().toISOString()
+                };
+                
+                // 获取页面基本信息
+                const metaTags = Array.from(document.querySelectorAll('meta')).map(meta => ({
+                  name: meta.name || meta.property || 'unknown',
+                  content: meta.content
+                }));
+                
+                // 获取页面结构信息
+                const headings = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6')).map(heading => ({
+                  tag: heading.tagName.toLowerCase(),
+                  text: heading.textContent.trim().substring(0, 100),
+                  id: heading.id || null
+                }));
+                
+                // 获取表单信息
+                const forms = Array.from(document.querySelectorAll('form')).map(form => ({
+                  action: form.action,
+                  method: form.method,
+                  inputCount: form.querySelectorAll('input, textarea, select').length
+                }));
+                
+                // 获取链接信息
+                const links = Array.from(document.querySelectorAll('a[href]')).slice(0, 20).map(link => ({
+                  text: link.textContent.trim().substring(0, 50),
+                  href: link.href
+                }));
+                
+                // 获取图片信息
+                const images = Array.from(document.querySelectorAll('img')).slice(0, 10).map(img => ({
+                  src: img.src,
+                  alt: img.alt || '',
+                  width: img.naturalWidth,
+                  height: img.naturalHeight
+                }));
+                
+                // 获取输入框信息
+                const inputs = Array.from(document.querySelectorAll('input, textarea')).map(input => ({
+                  type: input.type || 'text',
+                  name: input.name || input.id || '',
+                  placeholder: input.placeholder || '',
+                  required: input.required || false
+                }));
+                
+                // 获取按钮信息
+                const buttons = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"]')).map(button => ({
+                  text: button.textContent.trim() || button.value || '',
+                  type: button.type || 'button'
+                }));
+                
+                // 获取表格信息
+                const tables = Array.from(document.querySelectorAll('table')).map(table => ({
+                  rowCount: table.querySelectorAll('tr').length,
+                  columnCount: table.querySelectorAll('tr:first-child td, tr:first-child th').length
+                }));
+                
+                // 获取列表信息
+                const lists = Array.from(document.querySelectorAll('ul, ol')).map(list => ({
+                  type: list.tagName.toLowerCase(),
+                  itemCount: list.querySelectorAll('li').length
+                }));
+                
+                // 获取脚本和样式信息
+                const scripts = Array.from(document.querySelectorAll('script[src]')).map(script => script.src);
+                const stylesheets = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).map(link => link.href);
+                
+                // 获取页面性能信息
+                const performance = window.performance && window.performance.timing ? {
+                  loadTime: window.performance.timing.loadEventEnd - window.performance.timing.navigationStart,
+                  domContentLoaded: window.performance.timing.domContentLoadedEventEnd - window.performance.timing.navigationStart
+                } : null;
+                
+                resolve({
+                  pageInfo,
+                  metaTags,
+                  headings,
+                  forms,
+                  links,
+                  images,
+                  inputs,
+                  buttons,
+                  tables,
+                  lists,
+                  scripts,
+                  stylesheets,
+                  performance
+                });
+              } catch (error) {
+                reject(error);
+              }
+            });
+          `).then(analysis => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ 
+              success: true, 
+              message: 'Page analyzed successfully',
+              result: analysis
+            }));
+          }).catch(error => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: error.message }));
+          });
+        } catch (error) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, message: error.message }));
+        }
+      } else {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
+      }
+      return;
+    }
+    
+    // 添加控制台日志路由处理
+    if (pathname === '/browser/consoleLogs' && req.method === 'GET') {
+      const type = parsedUrl.query.type || 'all';
+      const limit = parseInt(parsedUrl.query.limit) || 50;
+      
+      // 在 BrowserView 中获取控制台日志
+      if (browserView) {
+        try {
+          browserView.webContents.executeJavaScript(`
+            new Promise((resolve, reject) => {
+              try {
+                const logs = [];
+                const consoleMethods = ['log', 'warn', 'error', 'info', 'debug'];
+                
+                // 重写 console 方法来捕获日志
+                consoleMethods.forEach(method => {
+                  const originalMethod = console[method];
+                  console[method] = function(...args) {
+                    if (logs.length < ${limit}) {
+                      logs.push({
+                        type: method,
+                        message: args.map(arg => 
+                          typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
+                        ).join(' '),
+                        timestamp: new Date().toISOString()
+                      });
+                    }
+                    // 调用原始方法
+                    originalMethod.apply(console, args);
+                  };
+                });
+                
+                // 等待一小段时间让日志积累
+                setTimeout(() => {
+                  resolve(logs);
+                }, 1000);
+                
+              } catch (error) {
+                reject(error);
+              }
+            });
+          `).then(logs => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ 
+              success: true, 
+              message: 'Console logs retrieved successfully',
+              result: logs
+            }));
+          }).catch(error => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: error.message }));
+          });
+        } catch (error) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, message: error.message }));
+        }
+      } else {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
+      }
+      return;
+    }
+
+    // 添加截图路由处理
+    if (pathname === '/browser/screenshot' && req.method === 'GET') {
+      const fullPage = parsedUrl.query.fullPage === 'true';
+      const selector = parsedUrl.query.selector || null;
+      
+      // 在 BrowserView 中进行截图
+      if (browserView) {
+        try {
+          const captureOptions = {
+            type: 'png',
+            encoding: 'base64'
+          };
+          
+          let capturePromise;
+          
+          if (selector) {
+            // 截图特定元素
+            capturePromise = browserView.webContents.executeJavaScript(`
+              new Promise((resolve, reject) => {
+                try {
+                  const element = document.querySelector('${selector}');
+                  if (!element) {
+                    reject(new Error('Element not found: ${selector}'));
+                    return;
+                  }
+                  
+                  const rect = element.getBoundingClientRect();
+                  resolve({
+                    x: Math.floor(rect.left),
+                    y: Math.floor(rect.top),
+                    width: Math.floor(rect.width),
+                    height: Math.floor(rect.height)
+                  });
+                } catch (error) {
+                  reject(error);
+                }
+              });
+            `).then(bounds => {
+              return browserView.webContents.capturePage({
+                x: bounds.x,
+                y: bounds.y,
+                width: bounds.width,
+                height: bounds.height
+              }, captureOptions);
+            });
+          } else if (fullPage) {
+            // 截图整个页面
+            capturePromise = browserView.webContents.executeJavaScript(`
+              new Promise((resolve) => {
+                const body = document.body;
+                const html = document.documentElement;
+                
+                const height = Math.max(
+                  body.scrollHeight,
+                  body.offsetHeight,
+                  html.clientHeight,
+                  html.scrollHeight,
+                  html.offsetHeight
+                );
+                
+                resolve(height);
+              });
+            `).then(pageHeight => {
+              // 调整 BrowserView 大小以适应整个页面
+              const currentBounds = browserView.getBounds();
+              browserView.setBounds({
+                ...currentBounds,
+                height: pageHeight
+              });
+              
+              // 等待调整完成
+              return new Promise(resolve => setTimeout(resolve, 500));
+            }).then(() => {
+              return browserView.webContents.capturePage(captureOptions);
+            });
+          } else {
+            // 截图当前视口
+            capturePromise = browserView.webContents.capturePage(captureOptions);
+          }
+          
+          capturePromise.then(image => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ 
+              success: true, 
+              message: 'Screenshot captured successfully',
+              result: image
+            }));
+          }).catch(error => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: error.message }));
+          });
+        } catch (error) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, message: error.message }));
+        }
+      } else {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
+      }
+      return;
+    }
+    
+    // 默认路由
+    res.writeHead(404, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ success: false, message: 'Not found' }));
+  });
+  
+  // 同时监听 IPv4 和 IPv6 地址
+  controlServer.listen(CONTROL_PORT, '0.0.0.0', () => {
+    console.log(`[MAIN] 远程控制服务器启动于 http://0.0.0.0:${CONTROL_PORT}`);
+  });
+  
+  // 同时监听 IPv6
+  controlServer.listen(CONTROL_PORT, '::', () => {
+    console.log(`[MAIN] 远程控制服务器启动于 http://[::]:${CONTROL_PORT}`);
+  });
+  
+  controlServer.on('error', (error) => {
+    console.error(`[MAIN] 远程控制服务器启动失败: ${error.message}`);
+  });
+}
+
+// 停止远程控制 HTTP 服务器
+function stopControlServer() {
+  if (controlServer) {
+    controlServer.close(() => {
+      console.log('[MAIN] 远程控制服务器已停止');
+    });
+    controlServer = null;
+  }
+}
+
+// 检查端口是否可用
+function isPortAvailable(port) {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.listen(port, () => {
+      server.close();
+      resolve(true);
+    });
+    server.on('error', () => {
+      resolve(false);
+    });
+  });
+}
+
+// 启动 Spring Boot 服务
+async function startSpringBootService() {
+  return new Promise(async (resolve, reject) => {
+    console.log('[MAIN] 检查 Spring Boot 服务端口...');
+    
+    // 检查端口是否已被占用
+    const portAvailable = await isPortAvailable(SPRING_BOOT_PORT);
+    if (!portAvailable) {
+      console.log('[MAIN] Spring Boot 服务已在运行');
+      resolve({ port: SPRING_BOOT_PORT, started: false });
+      return;
+    }
+
+    console.log('[MAIN] 启动 Spring Boot 服务...');
+    
+    // 确定 JAR 文件路径
+    const jarPath = isDev 
+      ? path.join(__dirname, '../react-mcp-demo/target/react-mcp-demo-0.0.1-SNAPSHOT.jar')
+      : path.join(__dirname, 'spring-boot-server/react-mcp-demo-0.0.1-SNAPSHOT.jar');
+
+    // 启动 Spring Boot 应用
+    springBootProcess = spawn('java', ['-jar', jarPath], {
+      cwd: path.dirname(jarPath),
+    });
+
+    springBootProcess.stdout.on('data', (data) => {
+      const output = data.toString();
+      console.log(`[SPRING BOOT] ${output}`);
+      
+      // 检查服务是否启动完成
+      if (output.includes('Started ReactMcpApplication')) {
+        console.log('[MAIN] Spring Boot 服务启动成功');
+        resolve({ port: SPRING_BOOT_PORT, started: true });
+      }
+    });
+
+    springBootProcess.stderr.on('data', (data) => {
+      console.error(`[SPRING BOOT ERROR] ${data}`);
+    });
+
+    springBootProcess.on('error', (error) => {
+      console.error('[MAIN] 启动 Spring Boot 服务失败:', error);
+      reject(error);
+    });
+
+    // 设置超时
+    setTimeout(() => {
+      reject(new Error('Spring Boot 服务启动超时'));
+    }, SERVICE_START_TIMEOUT);
+  });
+}
+
+// 停止 Spring Boot 服务
+function stopSpringBootService() {
+  if (springBootProcess) {
+    console.log('[MAIN] 停止 Spring Boot 服务...');
+    springBootProcess.kill('SIGTERM');
+    springBootProcess = null;
+  }
+}
+
+// 应用准备就绪
+app.whenReady().then(async () => {
+  try {
+    // 启动远程控制服务器
+    startControlServer();
+    
+    // 启动 Spring Boot 服务
+    const serviceInfo = await startSpringBootService();
+    
+    // 创建主窗口
+    createWindow();
+    
+    // 等待Spring Boot服务完全启动后再通知渲染进程
+    setTimeout(async () => {
+      // 检查Spring Boot服务是否真的启动完成
+      let retries = 0;
+      const maxRetries = 30; // 最多重试30次，每次2秒，总共60秒
+      
+      while (retries < maxRetries) {
+        try {
+          const response = await fetch(`http://localhost:${serviceInfo.port}/`);
+          if (response.ok) {
+            console.log('[MAIN] Spring Boot服务已完全启动，通知渲染进程');
+            
+            // 通知渲染进程服务状态
+            BrowserWindow.getAllWindows().forEach(window => {
+              window.webContents.send('service-status', {
+                status: 'ready',
+                port: serviceInfo.port,
+                message: serviceInfo.started ? '服务启动成功' : '服务已在运行'
+              });
+            });
+            break;
+          }
+        } catch (error) {
+          console.log(`[MAIN] 等待Spring Boot服务启动中... (${retries + 1}/${maxRetries})`);
+        }
+        
+        retries++;
+        await new Promise(resolve => setTimeout(resolve, 2000)); // 等待2秒
+      }
+      
+      if (retries >= maxRetries) {
+        console.error('[MAIN] Spring Boot服务启动超时，通知渲染进程启动失败');
+        
+        // 通知渲染进程启动失败
+        BrowserWindow.getAllWindows().forEach(window => {
+          window.webContents.send('service-status', {
+            status: 'error',
+            message: '服务启动超时，请检查Spring Boot服务日志'
+          });
+        });
+      }
+    }, 5000); // 延迟5秒开始检查，给Spring Boot服务充分的启动时间
+  } catch (error) {
+    console.error('[MAIN] 启动失败:', error);
+    
+    // 通知渲染进程启动失败
+    BrowserWindow.getAllWindows().forEach(window => {
+      window.webContents.send('service-status', {
+        status: 'error',
+        message: `服务启动失败: ${error.message}`
+      });
+    });
+  }
+
+  // 应用激活时创建窗口
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    }
+  });
+});
+
+// 应用关闭时停止服务
+app.on('before-quit', () => {
+  stopSpringBootService();
+  stopControlServer();
+});
+
+// 所有窗口关闭时退出应用（非 macOS）
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
+
+// IPC 通信处理
+ipcMain.handle('get-service-info', async () => {
+  return {
+    port: SPRING_BOOT_PORT,
+    url: `http://localhost:${SPRING_BOOT_PORT}`
+  };
+});
+
+ipcMain.handle('check-service-status', async () => {
+  try {
+    const available = await isPortAvailable(SPRING_BOOT_PORT);
+    return {
+      running: !available, // 端口被占用表示服务正在运行
+      port: SPRING_BOOT_PORT
+    };
+  } catch (error) {
+    return {
+      running: false,
+      error: error.message
+    };
+  }
+});
+
+// IPC 处理浏览器控制命令
+ipcMain.handle('browser-navigate', async (event, url) => {
+  if (browserView) {
+    try {
+      await browserView.webContents.loadURL(url);
+      return { success: true, message: '页面加载成功' };
+    } catch (error) {
+      return { success: false, message: `页面加载失败: ${error.message}` };
+    }
+  }
+  return { success: false, message: '浏览器视图未初始化' };
+});
+
+ipcMain.handle('browser-reload', async () => {
+  if (browserView) {
+    browserView.webContents.reload();
+    return { success: true };
+  }
+  return { success: false, message: '浏览器视图未初始化' };
+});
+
+ipcMain.handle('browser-go-back', async () => {
+  if (browserView) {
+    browserView.webContents.goBack();
+    return { success: true };
+  }
+  return { success: false, message: '浏览器视图未初始化' };
+});
+
+ipcMain.handle('browser-go-forward', async () => {
+  if (browserView) {
+    browserView.webContents.goForward();
+    return { success: true };
+  }
+  return { success: false, message: '浏览器视图未初始化' };
+});
+
+ipcMain.handle('browser-execute-js', async (event, script) => {
+  if (browserView) {
+    try {
+      const result = await browserView.webContents.executeJavaScript(script);
+      return { success: true, result };
+    } catch (error) {
+      return { success: false, message: `脚本执行失败: ${error.message}` };
+    }
+  }
+  return { success: false, message: '浏览器视图未初始化' };
+});
+
+ipcMain.handle('browser-get-title', async () => {
+  if (browserView) {
+    const title = browserView.webContents.getTitle();
+    return { success: true, title };
+  }
+  return { success: false, message: '浏览器视图未初始化' };
+});
+
+ipcMain.handle('browser-get-url', async () => {
+  if (browserView) {
+    const url = browserView.webContents.getURL();
+    return { success: true, url };
+  }
+  return { success: false, message: '浏览器视图未初始化' };
+});
