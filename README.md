@@ -14,37 +14,37 @@
 
 ```mermaid
 graph TB
-    subgraph Electron客户端
-        UI[React UI<br/>控制面板]
-        BV[BrowserView<br/>浏览器视图]
-        Main[Main Process<br/>主进程]
-        Preload[Preload Script<br/>预加载脚本]
-        Remote[Remote Control<br/>HTTP Server :9222]
+    subgraph electron["Electron客户端"]
+        UI["React UI<br/>控制面板"]
+        BV["BrowserView<br/>浏览器视图"]
+        Main["Main Process<br/>主进程"]
+        Preload["Preload Script<br/>预加载脚本"]
+        Remote["Remote Control<br/>HTTP Server :9222"]
     end
     
-    subgraph Spring Boot后端
-        API[REST API<br/>:8080]
-        ReAct[ReAct Engine<br/>langchain4j]
-        Qwen[Qwen AI Model<br/>qwen3-max]
-        Tools[Playwright Tools<br/>浏览器自动化]
-        Memory[Chat Memory<br/>上下文管理]
+    subgraph springboot["Spring Boot后端"]
+        API["REST API<br/>:8080"]
+        ReAct["ReAct Engine<br/>langchain4j"]
+        Qwen["Qwen AI Model<br/>qwen3-max"]
+        Tools["Playwright Tools<br/>浏览器自动化"]
+        Memory["Chat Memory<br/>上下文管理"]
     end
     
-    User((用户)) --> UI
-    UI -->|IPC| Main
-    UI -->|HTTP| API
-    Main -->|启动| API
-    Main -->|控制| BV
-    API -->|流式输出| UI
+    User(("用户")) --> UI
+    UI -->|"IPC"| Main
+    UI -->|"HTTP"| API
+    Main -->|"启动"| API
+    Main -->|"控制"| BV
+    API -->|"流式输出"| UI
     API --> ReAct
     ReAct --> Qwen
     ReAct --> Tools
     ReAct --> Memory
-    Tools -->|HTTP| Remote
-    Remote -->|CDP| BV
+    Tools -->|"HTTP"| Remote
+    Remote -->|"CDP"| BV
     
-    style Electron客户端 fill:#e1f5ff
-    style Spring Boot后端 fill:#fff4e1
+    style electron fill:#e1f5ff
+    style springboot fill:#fff4e1
     style User fill:#f0f0f0
 ```
 
