@@ -50,10 +50,14 @@ public class PlaywrightMcpTools {
     // 敏感词过滤列表（用于防止触发阿里云内容审查）
     private static final String[] SENSITIVE_KEYWORDS = {
         "政治", "宗教", "色情", "暴力", "恐怖", "赌博", "毒品", "违法", "犯罪",
-        "敏感", "争议", "冲突", "战争", "军事", "间谍", "叛乱", "颠覆", "分裂",
+        "敏感", "争议", "冲突", "战争", "军事", "间谍", "叛乱", "颇覆", "分裂",
         "抗议", "游行", "罢工", "骚乱", "暴乱", "恐怖主义", "极端主义", "民族矛盾",
         "领土争端", "国际纠纷", "外交风波", "政府丑闻", "官员腐败", "司法不公"
     };
+        
+    // 内容压缩配置：避免 token 超限
+    private static final int MAX_TEXT_LENGTH = 5000;  // 最大文本长度（约 2000 tokens）
+    private static final int MAX_HTML_LENGTH = 8000;  // 最大 HTML 长度（约 3000 tokens）
     
     // 控制台日志条目
     private static class ConsoleLogEntry {
@@ -67,21 +71,54 @@ public class PlaywrightMcpTools {
             this.timestamp = System.currentTimeMillis();
         }
     }
-    // 过滤敏感内容
+    // 过滤敏感内容并智能压缩
     private String filterSensitiveContent(String content) {
         if (content == null || content.isEmpty()) {
             return content;
         }
         
+        // 1. 过滤敏感词
         String filtered = content;
         for (String keyword : SENSITIVE_KEYWORDS) {
             filtered = filtered.replaceAll(keyword, "[敏感内容]");
         }
         
-        // 注意：此处不再进行长度限制和截断处理
-        // 分段读取将在调用层通过流式响应实现
-        
         return filtered;
+    }
+    
+    /**
+     * 智能压缩文本内容，避免 token 超限
+     * 策略：保留开头 + 中间采样 + 结尾
+     */
+    private String compressText(String text, int maxLength) {
+        if (text == null || text.length() <= maxLength) {
+            return text;
+        }
+        
+        // 分三段：开头 40%、中间 30%、结尾 30%
+        int headLen = (int)(maxLength * 0.4);
+        int middleLen = (int)(maxLength * 0.3);
+        int tailLen = maxLength - headLen - middleLen;
+        
+        String head = text.substring(0, Math.min(headLen, text.length()));
+        String tail = "";
+        String middle = "";
+        
+        if (text.length() > headLen + tailLen) {
+            // 从中间采样
+            int middleStart = (text.length() - middleLen) / 2;
+            middle = text.substring(middleStart, middleStart + middleLen);
+            tail = text.substring(text.length() - tailLen);
+            
+            return head + 
+                   "\n\n... [省略 " + (text.length() - maxLength) + " 字符] ...\n\n" + 
+                   middle + 
+                   "\n\n... [省略] ...\n\n" + 
+                   tail;
+        } else {
+            tail = text.substring(text.length() - tailLen);
+            return head + "\n\n... [省略] ...\n\n" + tail;
+        }
     }
     
     public PlaywrightMcpTools(ReActEventPublisher eventPublisher) {
@@ -1231,7 +1268,8 @@ public class PlaywrightMcpTools {
             }
             
             String base64 = Base64.getEncoder().encodeToString(screenshotBytes);
-            String result = "data:image/png;base64," + base64;
+            // 为避免 token 超限，不返回完整 base64 数据，只返回简短确认信息
+            String result = String.format("截图成功，大小: %d KB", screenshotBytes.length / 1024);
             
             log.info("│ 📤 返回结果:");
             log.info("│    截图大小: {} KB", screenshotBytes.length / 1024);

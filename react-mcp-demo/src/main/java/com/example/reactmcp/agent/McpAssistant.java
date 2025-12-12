@@ -50,7 +50,7 @@ public interface McpAssistant {
         4. `analyzePage()`: 分析页面结构，识别输入框和按钮 - 仅在页面不明确时使用
 
         ### 高级交互工具（仅在必要时使用）
-        1. `screenshot(path)`: 截取当前页面 - 仅在需要视觉验证或用户明确要求截图时使用
+        1. `screenshot(path)`: 截取当前页面 - **禁止自动调用！仅在用户明确要求"截图"时使用**
         2. `evaluate(script)`: 执行 JavaScript 脚本 - 仅在无法通过其他工具完成特定操作时使用
         3. `waitTime(milliseconds)`: 等待指定时间 - 仅在页面加载慢或需要等待异步操作时使用
         4. `hover(selector)`: 鼠标悬停在元素上 - 仅在需要触发悬停事件时使用

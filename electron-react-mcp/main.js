@@ -40,8 +40,11 @@ function createWindow() {
   });
 
   // 加载本地 UI 页面（客户端项目中的 HTML 文件）
-  const localHtmlPath = path.join(__dirname, 'react-ui/public/index.html');
+  const localHtmlPath = isDev 
+    ? path.join(__dirname, 'react-ui/public/index.html')
+    : path.join(process.resourcesPath, 'react-ui/build/index.html');
   console.log('[MAIN] 加载本地 UI 页面:', localHtmlPath);
+  console.log('[MAIN] isDev:', isDev, 'resourcesPath:', process.resourcesPath);
   mainWindow.loadFile(localHtmlPath).catch(err => {
     console.error('[MAIN] 加载本地页面失败:', err);
   });
@@ -1030,7 +1033,9 @@ async function startSpringBootService() {
     // 确定 JAR 文件路径
     const jarPath = isDev 
       ? path.join(__dirname, '../react-mcp-demo/target/react-mcp-demo-0.0.1-SNAPSHOT.jar')
-      : path.join(__dirname, 'spring-boot-server/react-mcp-demo-0.0.1-SNAPSHOT.jar');
+      : path.join(process.resourcesPath, 'app.asar.unpacked/spring-boot-server/react-mcp-demo-0.0.1-SNAPSHOT.jar');
+    console.log('[MAIN] JAR 文件路径:', jarPath);
+    console.log('[MAIN] JAR 文件是否存在:', require('fs').existsSync(jarPath));
 
     // 启动 Spring Boot 应用
     springBootProcess = spawn('java', ['-jar', jarPath], {
@@ -1178,6 +1183,23 @@ ipcMain.handle('check-service-status', async () => {
   } catch (error) {
     return {
       running: false,
+      error: error.message
+    };
+  }
+});
+
+// 处理 spring-boot-status IPC 请求
+ipcMain.handle('spring-boot-status', async () => {
+  try {
+    const available = await isPortAvailable(SPRING_BOOT_PORT);
+    return {
+      running: !available, // 端口被占用表示服务正在运行
+      port: SPRING_BOOT_PORT
+    };
+  } catch (error) {
+    return {
+      running: false,
+      port: SPRING_BOOT_PORT,
       error: error.message
     };
   }

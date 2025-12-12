@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import './App.css';
 
+const API_BASE_URL = 'http://localhost:8080';
+
 function App() {
   const [logs, setLogs] = useState([]);
   const [taskInput, setTaskInput] = useState('');
@@ -16,6 +18,11 @@ function App() {
         setSpringBootStatus(status);
         setIsConnected(status.running);
         
+        if (status.running) {
+          addLog(`服务已连接 (端口: ${status.port})`, 'success');
+        } else {
+          addLog('服务未运行', 'error');
+        }
         addLog('应用已初始化', 'info');
       } catch (error) {
         addLog(`初始化失败: ${error.message}`, 'error');
@@ -36,10 +43,53 @@ function App() {
       return;
     }
 
+    if (!isConnected) {
+      addLog('错误: 无法连接到后端服务，请检查服务是否正常运行', 'error');
+      return;
+    }
+
     addLog(`执行任务: ${taskInput}`, 'info');
     
     try {
-      // 这里可以添加与后端通信的逻辑
+      // 调用后端 ReAct 流式接口
+      const response = await fetch(`${API_BASE_URL}/react/solve-stream?task=${encodeURIComponent(taskInput)}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data:')) {
+            try {
+              const data = JSON.parse(line.substring(5).trim());
+              if (data.type === 'thought') {
+                addLog(`💭 思考: ${data.content}`, 'info');
+              } else if (data.type === 'action') {
+                addLog(`🔧 执行: ${data.content}`, 'info');
+              } else if (data.type === 'observation') {
+                addLog(`👁️ 观察: ${data.content}`, 'info');
+              } else if (data.type === 'final_answer') {
+                addLog(`✅ 答案: ${data.content}`, 'success');
+              }
+            } catch (e) {
+              // 忽略 JSON 解析错误
+            }
+          }
+        }
+      }
+
       addLog('任务执行完成', 'success');
     } catch (error) {
       addLog(`任务执行失败: ${error.message}`, 'error');

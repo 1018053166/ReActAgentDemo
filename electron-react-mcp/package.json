@@ -22,14 +22,20 @@
     "files": [
       "main.js",
       "preload.js",
-      "react-ui/build/**/*",
-      "spring-boot-server/**/*",
       "node_modules/**/*"
+    ],
+    "asarUnpack": [
+      "spring-boot-server/**/*"
     ],
     "extraResources": [
       {
         "from": "react-ui/build",
         "to": "react-ui/build",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "spring-boot-server",
+        "to": "app.asar.unpacked/spring-boot-server",
         "filter": ["**/*"]
       }
     ],
