@@ -1525,13 +1525,20 @@ public class PlaywrightMcpTools {
                 "}"
             );
             
+            // 应用智能压缩避免 token 超限
+            String compressed = compressText(visibleText, MAX_TEXT_LENGTH);
+            
             log.info("│ 📤 返回结果:");
-            log.info("│    文本长度: {} 字符", visibleText.length());
+            log.info("│    原始长度: {} 字符", visibleText.length());
+            log.info("│    压缩后长度: {} 字符", compressed.length());
+            if (compressed.length() < visibleText.length()) {
+                log.info("│    压缩率: {}%", String.format("%.1f", (1 - compressed.length() * 1.0 / visibleText.length()) * 100));
+            }
             log.info("└─────────────────────────────────────────────────────────────┘");
             log.info("");
             
             // 过滤敏感内容后再返回
-            return filterSensitiveContent(visibleText);
+            return filterSensitiveContent(compressed);
         } catch (Exception e) {
             String error = "获取可见文本失败: " + e.getMessage();
             log.error("│ ❌ 错误: {}", error);
@@ -1599,13 +1606,20 @@ public class PlaywrightMcpTools {
                 args
             );
             
+            // 应用智能压缩避免 token 超限
+            String compressed = compressText(html, MAX_HTML_LENGTH);
+            
             log.info("│ 📤 返回结果:");
-            log.info("│    HTML 长度: {} 字符", html.length());
+            log.info("│    原始长度: {} 字符", html.length());
+            log.info("│    压缩后长度: {} 字符", compressed.length());
+            if (compressed.length() < html.length()) {
+                log.info("│    压缩率: {}%", String.format("%.1f", (1 - compressed.length() * 1.0 / html.length()) * 100));
+            }
             log.info("└─────────────────────────────────────────────────────────────┘");
             log.info("");
             
             // 过滤敏感内容后再返回
-            return filterSensitiveContent(html);
+            return filterSensitiveContent(compressed);
         } catch (Exception e) {
             String error = "获取 HTML 失败: " + e.getMessage();
             log.error("│ ❌ 错误: {}", error);
