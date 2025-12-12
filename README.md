@@ -1,12 +1,7 @@
 # ReAct MCP 智能代理客户端
 
-基于 ReAct 框架的智能代理系统，集成 Playwright 浏览器自动化能力，采用 Electron + Spring Boot 一体化架构，为集团内部提供开箱即用的 AI 自动化工具。
+基于 ReAct 框架的智能代理系统，集成 Playwright 浏览器自动化能力，采用 Electron + Spring Boot 一体化架构，开箱即用的 AI 自动化工具案例。
 
-## 🎯 项目定位
-
-- **使用范围**：集团内部使用，服务各子公司
-- **核心能力**：AI 驱动的浏览器自动化 + 智能决策
-- **技术亮点**：ReAct 框架 + 上下文智能压缩 + 流式交互
 
 ## 📐 系统架构
 
@@ -54,7 +49,7 @@ graph TB
 graph TD
     subgraph 表现层
         UI[React UI 控制面板<br/>- 任务输入<br/>- 执行日志<br/>- 案例按钮]
-        BrowserView[BrowserView 浏览器<br/>- 70% 右侧区域<br/>- 独立渲染进程<br/>- DevTools 支持]
+        BrowserView[BrowserView 浏览器<br/>- 独立渲染进程<br/>- DevTools 支持]
     end
     
     subgraph 进程间通信层
@@ -144,7 +139,7 @@ graph TD
     N -->|开发模式| O[加载 react-ui/public/index.html]
     N -->|打包模式| P[加载 process.resourcesPath/react-ui/build/index.html]
     
-    O --> Q[创建 BrowserView<br/>设置三七分布局]
+    O --> Q[创建 BrowserView<br/>]
     P --> Q
     
     Q --> R[启动远程控制服务器 :9222]
@@ -301,7 +296,75 @@ MCP/
 
 ## 🚀 快速开始
 
-### 方式一：使用安装包（推荐）
+### 🎯 推荐方式：使用一键脚本
+
+项目提供了三个便捷脚本，简化开发和打包流程：
+
+#### 1. 安装包打包脚本 `build-package.sh`
+
+**完整流程**（编译后端 + 打包客户端）：
+```bash
+./build-package.sh
+```
+
+**跳过后端编译**（仅打包客户端）：
+```bash
+./build-package.sh --skip-backend
+```
+
+**功能说明**：
+- ✅ 自动编译 Spring Boot 后端
+- ✅ 复制 JAR 文件到客户端项目
+- ✅ 编译 React UI
+- ✅ 打包生成安装包（DMG/EXE/AppImage）
+- ✅ 显示打包产物位置和大小
+
+#### 2. 客户端启动脚本 `start-frontend.sh`
+
+**开发模式启动**（推荐，支持热重载）：
+```bash
+./start-frontend.sh
+```
+
+**生产模式启动**（先编译再启动）：
+```bash
+./start-frontend.sh --build
+```
+
+**功能说明**：
+- ✅ 自动检查并安装依赖
+- ✅ 验证后端 JAR 文件存在
+- ✅ 检测端口占用情况
+- ✅ 启动 Electron 客户端
+- ✅ 自动启动内嵌 Spring Boot 服务
+
+#### 3. 后端启动脚本 `start-backend.sh`
+
+**编译并启动**：
+```bash
+./start-backend.sh
+```
+
+**跳过编译，直接启动**：
+```bash
+./start-backend.sh --skip-build
+```
+
+**编译并复制到客户端目录**：
+```bash
+./start-backend.sh --copy-to-frontend
+```
+
+**功能说明**：
+- ✅ 自动检查端口占用（支持交互式停止现有服务）
+- ✅ Maven 编译后端项目
+- ✅ 可选复制 JAR 到客户端目录
+- ✅ 启动 Spring Boot 服务
+- ✅ 显示服务地址和 API 端点
+
+---
+
+### 方式一：使用安装包（终端用户）
 
 1. **下载安装包**
    ```bash
@@ -319,20 +382,28 @@ MCP/
    - 在左侧输入任务，点击「执行任务」
    - 右侧 BrowserView 实时展示浏览器操作
 
-### 方式二：开发模式运行
+### 方式二：开发模式运行（推荐开发者）
 
 #### 环境要求
 - **Java 17+**
 - **Node.js 14+**
 - **Maven 3.6+**
 
-#### 1. 编译后端
+#### 快速启动（推荐）
+```bash
+# 使用一键脚本
+./start-frontend.sh
+```
+
+#### 手动启动
+
+**1. 编译后端**
 ```bash
 cd react-mcp-demo
 mvn clean package -DskipTests
 ```
 
-#### 2. 启动客户端
+**2. 启动客户端**
 ```bash
 cd electron-react-mcp
 npm install
@@ -343,13 +414,24 @@ npm start
 
 ### 方式三：分离启动（调试模式）
 
-#### 1. 手动启动后端
+#### 快速启动（推荐）
+```bash
+# 终端 1: 启动后端
+./start-backend.sh
+
+# 终端 2: 启动客户端
+./start-frontend.sh
+```
+
+#### 手动启动
+
+**1. 手动启动后端**
 ```bash
 cd react-mcp-demo
 java -jar target/react-mcp-demo-0.0.1-SNAPSHOT.jar
 ```
 
-#### 2. 启动客户端
+**2. 启动客户端**
 ```bash
 cd electron-react-mcp
 npm start
@@ -673,4 +755,3 @@ npm run dist 2>&1 | tee build.log
 
 **版本**: 1.0.0  
 **更新时间**: 2025-12-12  
-**维护团队**: ReAct MCP Team
