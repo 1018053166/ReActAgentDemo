@@ -5,12 +5,24 @@ spring:
   application:
     name: react-mcp-demo
 
-# LangChain4j Qwen 模型配置
+# LangChain4j 模型配置（支持多种 LLM 提供商）
 langchain4j:
+  # 模型提供商选择：qwen | openai
+  provider: qwen
+  
+  # 上下文管理配置
+  max-messages: 10  # 消息窗口大小，避免 token 超限
+  
+  # Qwen 模型配置（阿里云 DashScope）
   qwen:
     api-key: ${QWEN_API_KEY:sk-your-qwen-api-key-here}
     model-name: qwen3-max
-    max-messages: 10  # 降低到 10，避免 token 超限（Qwen 上限 258048）
+  
+  # OpenAI 协议模型配置（支持私有化部署）
+  openai:
+    base-url: https://api.openai.com/v1  # 私有化网关示例: http://your-llm-gateway.com/v1
+    api-key: sk-your-openai-key-here      # 替换为你的 OpenAI/私有化服务 API Key
+    model-name: gpt-4o-mini               # 模型名称，私有化服务中配置的模型 ID
 
 # 远程浏览器配置（用于 Electron BrowserView 集成）
 app:

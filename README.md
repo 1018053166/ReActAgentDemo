@@ -36,7 +36,7 @@ graph TB
     ReAct --> Tools
     ReAct --> Memory
     Tools -->|"HTTP"| Remote
-    Remote -->|"CDP"| BV
+    Remote -->|"CDP(Chrome DevTools Protocol)"| BV
     
     style electron fill:#e1f5ff
     style springboot fill:#fff4e1
