@@ -48,3 +48,10 @@ electron-react-mcp/spring-boot-server/*.jar
 *.bak
 *.swp
 *~
+
+# Environment variables (敏感信息)
+.env
+.env.local
+application-local.yml
+application-*.yml
+!application.yml

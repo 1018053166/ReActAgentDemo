@@ -13,6 +13,58 @@
 
 ## 配置方式
 
+### 🔐 安全最佳实践：使用环境变量
+
+**强烈推荐使用环境变量管理敏感信息（API Key），避免将密钥提交到代码仓库！**
+
+#### 步骤 1：创建本地环境变量文件
+
+```bash
+# 复制环境变量模板
+cp .env.example .env
+
+# 编辑 .env 文件，填写真实的 API Key
+vim .env
+```
+
+`.env` 文件示例：
+```bash
+# Qwen 配置
+QWEN_API_KEY=sk-your-real-qwen-api-key-here
+
+# OpenAI 配置
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_API_KEY=sk-proj-xxx-your-real-key-xxx
+OPENAI_MODEL_NAME=gpt-4o-mini
+```
+
+**注意：** `.env` 文件已在 `.gitignore` 中配置忽略，不会被提交到 Git！
+
+#### 步骤 2：在 application.yml 中引用环境变量
+
+项目已配置为自动读取环境变量，格式：`${ENV_NAME:默认值}`
+
+```yaml
+langchain4j:
+  provider: qwen
+  qwen:
+    api-key: ${QWEN_API_KEY:sk-your-qwen-api-key-here}  # 优先读取环境变量
+  openai:
+    base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
+    api-key: ${OPENAI_API_KEY:sk-your-openai-key-here}
+    model-name: ${OPENAI_MODEL_NAME:gpt-4o-mini}
+```
+
+#### 步骤 3：启动项目
+
+项目会自动加载 `.env` 文件中的环境变量：
+
+```bash
+./start-backend.sh --copy-to-frontend
+```
+
+---
+
 ### 方式一：使用 Qwen 模型（默认）
 
 ```yaml

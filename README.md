@@ -441,7 +441,86 @@ npm start
 
 ## ⚙️ 配置说明
 
-### Qwen API Key
+### 🔐 安全配置：API Key 管理
+
+**强烈推荐使用环境变量管理敏感信息，避免将 API Key 提交到代码仓库！**
+
+#### 步骤 1：创建本地环境变量文件
+
+```bash
+# 复制环境变量模板
+cp .env.example .env
+
+# 编辑 .env 文件，填写真实的 API Key
+vim .env
+```
+
+`.env` 文件示例：
+```bash
+# Qwen 配置
+QWEN_API_KEY=sk-your-real-qwen-api-key-here
+
+# OpenAI 配置
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_API_KEY=sk-proj-xxx-your-real-key-xxx
+OPENAI_MODEL_NAME=gpt-4o-mini
+```
+
+**注意：** `.env` 文件已在 `.gitignore` 中配置忽略，不会被提交到 Git！
+
+#### 步骤 2：启动项目
+
+项目会自动加载 `.env` 文件中的环境变量：
+
+```bash
+./start-backend.sh --copy-to-frontend
+```
+
+或手动启动：
+```bash
+cd react-mcp-demo
+mvn clean package -DskipTests
+java -jar target/react-mcp-demo-0.0.1-SNAPSHOT.jar
+```
+
+---
+
+### 多 LLM 提供商支持
+
+项目支持多种 LLM 提供商，可通过配置文件切换：
+
+#### 支持的提供商
+- **Qwen**（阿里云 DashScope）- 默认
+- **OpenAI** 官方 API
+- **私有化 OpenAI 协议服务**（vLLM, Ollama, 内部网关等）
+
+#### 配置示例
+
+**使用 Qwen（默认）：**
+```yaml
+# react-mcp-demo/src/main/resources/application.yml
+langchain4j:
+  provider: qwen
+  qwen:
+    api-key: ${QWEN_API_KEY:sk-your-qwen-api-key-here}
+    model-name: qwen-turbo  # 或 qwen3-max
+```
+
+**切换到私有化 OpenAI：**
+```yaml
+langchain4j:
+  provider: openai  # ← 只需修改这一行
+  openai:
+    base-url: ${OPENAI_BASE_URL:http://your-gateway.com/v1}
+    api-key: ${OPENAI_API_KEY:sk-your-private-key}
+    model-name: ${OPENAI_MODEL_NAME:gpt-4o-mini}
+```
+
+📚 **详细配置指南**：请查看 [LLM_PROVIDER_GUIDE.md](./LLM_PROVIDER_GUIDE.md)
+
+---
+
+### Qwen API Key（旧版配置，不推荐）
 
 在 `react-mcp-demo/src/main/resources/application.yml` 中配置：
 
