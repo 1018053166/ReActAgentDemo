@@ -294,14 +294,24 @@ MCP/
 
 **完整流程**(编译 React UI + 打包客户端):
 ```bash
+# 交互式打包（菜单选择平台）
 ./build-package.sh
+
+# 命令行打包（适合 CI/CD）
+./build-package.sh --mac      # 仅打包 macOS
+./build-package.sh --win      # 仅打包 Windows
+./build-package.sh --all      # 打包所有平台
+./build-package.sh --auto     # 自动打包当前平台（非交互）
+./build-package.sh --prepare  # 仅准备后端（不打包）
 ```
 
 **功能说明**:
-- ✅ 编译 React UI
 - ✅ 复制 Node.js 后端到打包目录
+- ✅ 安装客户端依赖（如需要）
+- ✅ 支持交互式和命令行两种模式
 - ✅ 打包生成安装包(DMG/EXE/AppImage)
 - ✅ 显示打包产物位置和大小
+- ✅ 适配多平台和 CI/CD 环境
 
 #### 2. 客户端启动脚本 `start-frontend.sh`
 

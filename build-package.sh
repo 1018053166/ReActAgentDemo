@@ -2,9 +2,14 @@
 
 ###############################################################################
 # ReAct MCP 客户端打包脚本
-# 功能：复制 Node.js 后端 → React UI 编译 → 客户端打包 → 生成安装包
+# 功能：复制 Node.js 后端 → 客户端打包 → 生成安装包
 # 用法：
-#   ./build-package.sh              # 完整流程（复制后端 + 打包客户端）
+#   ./build-package.sh                    # 交互式选择平台
+#   ./build-package.sh --mac              # 仅打包 macOS
+#   ./build-package.sh --win              # 仅打包 Windows
+#   ./build-package.sh --all              # 打包所有平台
+#   ./build-package.sh --prepare          # 仅准备后端（不打包）
+#   ./build-package.sh --auto             # 自动打包当前平台（非交互，适合 CI/CD）
 ###############################################################################
 
 set -e  # 遇到错误立即退出
@@ -38,8 +43,58 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1"
 }
 
-# 检查参数
-SKIP_BACKEND=false
+# 解析命令行参数
+PLATFORM=""
+INTERACTIVE=true
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --mac)
+            PLATFORM="mac"
+            INTERACTIVE=false
+            shift
+            ;;
+        --win)
+            PLATFORM="win"
+            INTERACTIVE=false
+            shift
+            ;;
+        --all)
+            PLATFORM="all"
+            INTERACTIVE=false
+            shift
+            ;;
+        --prepare)
+            PLATFORM="prepare"
+            INTERACTIVE=false
+            shift
+            ;;
+        --auto)
+            PLATFORM="auto"
+            INTERACTIVE=false
+            shift
+            ;;
+        -h|--help)
+            echo "用法: $0 [选项]"
+            echo ""
+            echo "选项:"
+            echo "  --mac          仅打包 macOS 平台"
+            echo "  --win          仅打包 Windows 平台"
+            echo "  --all          打包所有平台"
+            echo "  --prepare      仅准备后端（不打包）"
+            echo "  --auto         自动打包当前平台（适合 CI/CD）"
+            echo "  -h, --help     显示帮助信息"
+            echo ""
+            echo "无参数时使用交互式菜单选择平台"
+            exit 0
+            ;;
+        *)
+            log_error "未知参数: $1"
+            echo "使用 --help 查看帮助信息"
+            exit 1
+            ;;
+    esac
+done
 
 # 打印横幅
 echo ""
@@ -84,12 +139,77 @@ else
 fi
 
 ###############################################################################
-# 步骤 3/3: 打包客户端生成安装包
+# 步骤 3/4: 选择打包平台（交互式或命令行参数）
 ###############################################################################
-log_info "步骤 3/3: 打包 Electron 客户端..."
-log_info "执行 electron-builder 打包..."
+if [ "$INTERACTIVE" = true ]; then
+    log_info "步骤 3/4: 选择打包平台..."
+    echo ""
+    echo "请选择打包平台:"
+    echo "  1) Mac (dmg)"
+    echo "  2) Windows (exe)"
+    echo "  3) 所有平台"
+    echo "  4) 仅准备（不打包）"
+    echo ""
+    read -p "请输入选项 [1-4]: " choice
+    
+    case $choice in
+        1)
+            PLATFORM="mac"
+            ;;
+        2)
+            PLATFORM="win"
+            ;;
+        3)
+            PLATFORM="all"
+            ;;
+        4)
+            PLATFORM="prepare"
+            ;;
+        *)
+            log_error "无效选项"
+            exit 1
+            ;;
+    esac
+fi
 
-npm run dist
+# 如果选择仅准备，则退出
+if [ "$PLATFORM" = "prepare" ]; then
+    log_success "准备完成，跳过打包"
+    echo ""
+    log_info "下一步操作："
+    echo "  1. 手动打包 Mac: cd electron-react-mcp && npm run dist:mac"
+    echo "  2. 手动打包 Windows: cd electron-react-mcp && npm run dist:win"
+    echo "  3. 手动打包所有: cd electron-react-mcp && npm run dist:all"
+    exit 0
+fi
+
+###############################################################################
+# 步骤 4/4: 打包客户端生成安装包
+###############################################################################
+log_info "步骤 4/4: 打包 Electron 客户端..."
+
+case $PLATFORM in
+    mac)
+        log_info "打包 macOS 版本..."
+        npm run dist:mac
+        ;;
+    win)
+        log_info "打包 Windows 版本..."
+        npm run dist:win
+        ;;
+    all)
+        log_info "打包所有平台..."
+        npm run dist:all
+        ;;
+    auto)
+        log_info "自动打包当前平台..."
+        npm run dist
+        ;;
+    *)
+        log_error "未知平台: $PLATFORM"
+        exit 1
+        ;;
+esac
 
 # 检查打包结果
 if [ -d "dist" ]; then
