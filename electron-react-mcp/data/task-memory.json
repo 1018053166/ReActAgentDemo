@@ -1,5 +1,73 @@
 [
   {
+    "id": "1765879597253",
+    "timestamp": "2025-12-16T10:06:37.253Z",
+    "task": "访问 https://baidu.com 并获取页面标题",
+    "steps": [
+      {
+        "type": "action",
+        "iteration": 1,
+        "content": "navigate(url: \"https://baidu.com\")"
+      },
+      {
+        "type": "observation",
+        "iteration": 1,
+        "content": "成功导航到: https://baidu.com"
+      },
+      {
+        "type": "action",
+        "iteration": 2,
+        "content": "getPageTitle()"
+      },
+      {
+        "type": "observation",
+        "iteration": 2,
+        "content": "当前页面标题: 百度一下，你就知道"
+      }
+    ],
+    "result": "访问 https://baidu.com 成功，页面标题为 \"百度一下，你就知道\"。",
+    "success": true,
+    "toolsUsed": [
+      "navigate",
+      "getPageTitle"
+    ],
+    "complexity": 4
+  },
+  {
+    "id": "1765879576244",
+    "timestamp": "2025-12-16T10:06:16.244Z",
+    "task": "访问 https://example.com 并获取页面标题",
+    "steps": [
+      {
+        "type": "action",
+        "iteration": 1,
+        "content": "navigate(url: \"https://example.com\")"
+      },
+      {
+        "type": "observation",
+        "iteration": 1,
+        "content": "成功导航到: https://example.com"
+      },
+      {
+        "type": "action",
+        "iteration": 2,
+        "content": "getPageTitle()"
+      },
+      {
+        "type": "observation",
+        "iteration": 2,
+        "content": "当前页面标题: Example Domain"
+      }
+    ],
+    "result": "Final Answer: 访问 https://example.com 成功，页面标题为 \"Example Domain\"。",
+    "success": true,
+    "toolsUsed": [
+      "navigate",
+      "getPageTitle"
+    ],
+    "complexity": 4
+  },
+  {
     "id": "1765878428416",
     "timestamp": "2025-12-16T09:47:08.416Z",
     "task": "在b站找springboot教程，找到热度最高的教程，获取教程名称",
