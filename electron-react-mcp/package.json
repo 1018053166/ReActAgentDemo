@@ -4,17 +4,14 @@
   "description": "Electron client for React MCP Demo",
   "main": "main.js",
   "scripts": {
-    "start": "electron .",
+    "start": "electron . --remote-debugging-port=9223",
     "dev:react": "cd react-ui && npm start",
-    "dev:electron": "electron .",
+    "dev:electron": "electron . --remote-debugging-port=9223",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
     "dist:mac": "electron-builder --mac",
     "dist:win": "electron-builder --win",
     "dist:all": "electron-builder --mac --win",
-    "build:all": "npm run build:backend && npm run build:electron",
-    "build:backend": "cd ../node-mcp-backend && npm install",
-    "build:electron": "node scripts/build-electron.js",
     "postinstall": "electron-builder install-app-deps"
   },
   "build": {
@@ -26,21 +23,23 @@
     "files": [
       "main.js",
       "preload.js",
-      "node_modules/**/*"
+      "node-backend/**/*",
+      "node_modules/**/*",
+      "!node_modules/**/test/**",
+      "!node_modules/**/tests/**",
+      "!node-backend/node_modules/**/test/**",
+      "!node-backend/node_modules/**/tests/**"
     ],
     "asarUnpack": [
-      "node-backend/**/*"
+      "node-backend/**"
     ],
     "extraResources": [
       {
         "from": "react-ui/public",
         "to": "react-ui/build",
-        "filter": ["**/*"]
-      },
-      {
-        "from": "node-backend",
-        "to": "app.asar.unpacked/node-backend",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "mac": {
@@ -69,8 +68,15 @@
   },
   "author": "ReAct MCP Team",
   "dependencies": {
+    "axios": "^1.6.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
     "electron-is-dev": "^2.0.0",
-    "fs-extra": "^11.2.0"
+    "express": "^4.18.2",
+    "fs-extra": "^11.2.0",
+    "mammoth": "^1.6.0",
+    "playwright": "^1.57.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "concurrently": "^8.2.0",

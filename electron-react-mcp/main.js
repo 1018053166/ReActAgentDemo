@@ -5,6 +5,7 @@ const isDev = !app.isPackaged;
 const net = require('net');
 const http = require('http');
 const url = require('url');
+const { playwrightManager } = require('./playwright-manager');
 
 // 在 app.ready 之前禁用硬件加速以减少 EGL 错误
 app.disableHardwareAcceleration();
@@ -23,6 +24,8 @@ let browserView = null;
 let controlServer = null;
 // 远程控制端口
 const CONTROL_PORT = 9222;
+// Playwright 远程调试端口（用于 CDP 连接）
+const PLAYWRIGHT_DEBUG_PORT = 9223;
 
 // 主窗口引用
 let mainWindow = null;
@@ -38,6 +41,8 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
+      // 允许从 file:// 协议连接 localhost
+      webSecurity: false,
     },
   });
 
@@ -46,10 +51,13 @@ function createWindow() {
     ? path.join(__dirname, 'react-ui/public/index.html')
     : path.join(process.resourcesPath, 'react-ui/build/index.html');
   console.log('[MAIN] 加载本地 UI 页面:', localHtmlPath);
-  console.log('[MAIN] isDev:', isDev, 'resourcesPath:', process.resourcesPath);
+  console.log('[MAIN] isDev:', isDev, 'resourcesPath:', process.resourcesPath, '__dirname:', __dirname);
   mainWindow.loadFile(localHtmlPath).catch(err => {
     console.error('[MAIN] 加载本地页面失败:', err);
   });
+
+  // 临时开启主窗口开发者工具调试
+  mainWindow.webContents.openDevTools({ mode: 'detach' });
 
   // 创建 BrowserView 用于嵌入浏览器
   createBrowserView(mainWindow);
@@ -133,9 +141,9 @@ function createBrowserView(mainWindow) {
   browserView.setBackgroundColor('#FFFFFF');
 }
 
-// 启动远程控制 HTTP 服务器
+// 启动远程控制 HTTP 服务器 (使用 Playwright 统一控制)
 function startControlServer() {
-  controlServer = http.createServer((req, res) => {
+  controlServer = http.createServer(async (req, res) => {
     const parsedUrl = url.parse(req.url, true);
     const pathname = parsedUrl.pathname;
     
@@ -150,959 +158,254 @@ function startControlServer() {
       res.end();
       return;
     }
-    
-    // 路由处理
-    if (pathname === '/browser/navigate' && req.method === 'GET') {
-      const targetUrl = parsedUrl.query.url;
-      if (!targetUrl) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, message: 'Missing url parameter' }));
-        return;
-      }
-      
-      // 在 BrowserView 中导航到指定 URL
-      if (browserView) {
-        try {
-          browserView.webContents.loadURL(decodeURIComponent(targetUrl));
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ 
-            success: true, 
-            message: 'Navigation started',
-            url: decodeURIComponent(targetUrl)
-          }));
-        } catch (error) {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, message: error.message }));
-        }
-      } else {
-        res.writeHead(503, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
-      }
-      return;
-    }
-    
-    // 添加调试路由：获取所有输入框信息
-    if (pathname === '/browser/debug/inputs' && req.method === 'GET') {
-      if (browserView) {
-        try {
-          browserView.webContents.executeJavaScript(`
-            (function() {
-              const inputs = Array.from(document.querySelectorAll('input'));
-              return inputs.map(input => ({
-                tagName: input.tagName,
-                type: input.type,
-                name: input.name,
-                id: input.id,
-                className: input.className,
-                placeholder: input.placeholder,
-                ariaLabel: input.getAttribute('aria-label'),
-                visible: input.offsetParent !== null,
-                disabled: input.disabled
-              }));
-            })()
-          `).then(result => {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true, inputs: result }));
-          }).catch(error => {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: error.message }));
-          });
-        } catch (error) {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, message: error.message }));
-        }
-      } else {
-        res.writeHead(503, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
-      }
-      return;
-    }
-    
-    // 添加点击路由处理
-    if (pathname === '/browser/click' && req.method === 'GET') {
-      const selector = parsedUrl.query.selector;
-      if (!selector) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, message: 'Missing selector parameter' }));
-        return;
-      }
-      
-      // 在 BrowserView 中执行点击操作
-      if (browserView) {
-        try {
-          // 使用 evaluate 在页面中执行点击操作
-          browserView.webContents.executeJavaScript(`
-            (function() {
-              const selectorParam = ${JSON.stringify(selector)};
-              return new Promise((resolve, reject) => {
-                const element = document.querySelector(selectorParam);
-                if (element) {
-                  element.click();
-                  resolve({ success: true, message: 'Click executed' });
-                } else {
-                  reject(new Error('Element not found: ' + selectorParam));
-                }
-              });
-            })()
-          `).then(result => {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ 
-              success: true, 
-              message: 'Click executed successfully',
-              result: result
-            }));
-          }).catch(error => {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: error.message }));
-          });
-        } catch (error) {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, message: error.message }));
-        }
-      } else {
-        res.writeHead(503, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
-      }
-      return;
-    }
-    
-    // 添加输入路由处理
-    if (pathname === '/browser/fill' && req.method === 'GET') {
-      const selector = parsedUrl.query.selector;
-      const text = parsedUrl.query.text;
-      if (!selector || !text) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, message: 'Missing selector or text parameter' }));
-        return;
-      }
-      
-      // 在 BrowserView 中执行输入操作
-      if (browserView) {
-        try {
-          // 使用更智能的输入方法，添加等待和错误处理
-          browserView.webContents.executeJavaScript(`
-            (function() {
-              const selectorParam = ${JSON.stringify(selector)};
-              const textParam = ${JSON.stringify(text)};
-              
-              return new Promise((resolve, reject) => {
-                try {
-                  // 首先等待页面基本加载完成
-                  if (document.readyState !== 'complete') {
-                    window.addEventListener('load', () => {
-                      performFill();
-                    });
-                  } else {
-                    performFill();
-                  }
-                  
-                  function performFill() {
-                    // 多种策略尝试找到并填充输入框
-                    const strategies = [
-                      // 策略1: 直接使用传入的选择器
-                      (sel) => {
-                        try {
-                          const element = document.querySelector(sel);
-                          if (element) {
-                            console.log('Direct selector strategy success');
-                            return element;
-                          }
-                        } catch (e) {
-                          console.log('Direct selector failed:', e.message);
-                        }
-                        return null;
-                      },
-                      
-                      // 策略2: GitHub 搜索框特殊处理
-                      () => {
-                        const selectors = [
-                          'input[aria-label="Search or jump to..."]',
-                          'input[name="q"]',
-                          'input[type="search"]',
-                          'input[placeholder*="Search"]',
-                          'input[placeholder*="搜索"]',
-                          '#global-search',
-                          'input[aria-label*="search"]',
-                          'input[aria-label*="Search"]'
-                        ];
-                        
-                        for (const sel of selectors) {
-                          try {
-                            const element = document.querySelector(sel);
-                            if (element) {
-                              console.log('GitHub strategy success:', sel);
-                              return element;
-                            }
-                          } catch (e) {
-                            console.log('GitHub selector failed:', sel, e.message);
-                          }
-                        }
-                        return null;
-                      },
-                      
-                      // 策略3: 通用的搜索输入框
-                      () => {
-                        const inputs = Array.from(document.querySelectorAll('input'));
-                        for (const input of inputs) {
-                          try {
-                            const placeholder = input.placeholder?.toLowerCase() || '';
-                            const aria = input.getAttribute('aria-label')?.toLowerCase() || '';
-                            const name = input.name?.toLowerCase() || '';
-                            const id = input.id?.toLowerCase() || '';
-                            
-                            const isSearchBox = placeholder.includes('search') || 
-                                               placeholder.includes('搜索') ||
-                                               aria.includes('search') ||
-                                               aria.includes('搜索') ||
-                                               name.includes('search') ||
-                                               name.includes('q') ||
-                                               id.includes('search') ||
-                                               input.type === 'search';
-                            
-                            if (isSearchBox && !input.disabled && input.offsetParent !== null) {
-                              console.log('Generic search strategy success');
-                              return input;
-                            }
-                          } catch (e) {
-                            console.log('Generic input check failed:', e.message);
-                          }
-                        }
-                        return null;
-                      }
-                    ];
-                    
-                    let element = null;
-                    let strategy = 0;
-                    
-                    // 尝试不同的策略
-                    while (strategy < strategies.length && !element) {
-                      try {
-                        // 只有策略1需要传入选择器参数，其他策略不需要
-                        if (strategy === 0) {
-                          element = strategies[strategy](selectorParam);
-                        } else {
-                          element = strategies[strategy]();
-                        }
-                        
-                        if (element) {
-                          console.log('Found element using strategy', strategy + 1);
-                          break;
-                        }
-                        strategy++;
-                      } catch (e) {
-                        console.log('Strategy', strategy + 1, 'failed:', e.message);
-                        strategy++;
-                      }
-                    }
-                    
-                    if (!element) {
-                      reject(new Error('Input element not found using any strategy'));
-                      return;
-                    }
-                    
-                    // 等待元素可见并启用
-                    function waitForElement() {
-                      return new Promise((resolve, reject) => {
-                        const checkElement = () => {
-                          const style = window.getComputedStyle(element);
-                          const rect = element.getBoundingClientRect();
-                          
-                          if (style.display !== 'none' && 
-                              style.visibility !== 'hidden' && 
-                              style.opacity !== '0' &&
-                              rect.width > 0 && 
-                              rect.height > 0 &&
-                              !element.disabled) {
-                            resolve();
-                          } else {
-                            setTimeout(checkElement, 100);
-                          }
-                        };
-                        
-                        checkElement();
-                        
-                        // 超时保护
-                        setTimeout(() => {
-                          reject(new Error('Element not ready within timeout'));
-                        }, 10000);
-                      });
-                    }
-                    
-                    // 执行填充操作
-                    waitForElement().then(() => {
-                      // 模拟真实用户输入
-                      element.focus();
-                      element.select();
-                      
-                      // 清除现有内容
-                      element.value = '';
-                      
-                      // 逐字符输入，模拟真实打字
-                      let index = 0;
-                      const inputInterval = setInterval(() => {
-                        if (index < textParam.length) {
-                          element.value += textParam[index];
-                          
-                          // 触发输入事件
-                          element.dispatchEvent(new Event('input', { bubbles: true }));
-                          element.dispatchEvent(new KeyboardEvent('keydown', { key: textParam[index] }));
-                          element.dispatchEvent(new KeyboardEvent('keyup', { key: textParam[index] }));
-                          
-                          index++;
-                        } else {
-                          clearInterval(inputInterval);
-                          
-                          // 触发最终事件
-                          element.dispatchEvent(new Event('input', { bubbles: true }));
-                          element.dispatchEvent(new Event('change', { bubbles: true }));
-                          element.dispatchEvent(new Event('blur', { bubbles: true }));
-                          
-                          resolve({ 
-                            success: true, 
-                            message: 'Fill executed successfully',
-                            element: element.tagName + (element.id ? '#' + element.id : '') + (element.className ? '.' + element.className.split(' ')[0] : '')
-                          });
-                        }
-                      }, 10); // 每10ms输入一个字符
-                      
-                    }).catch(error => {
-                      reject(new Error('Element not ready: ' + error.message));
-                    });
-                  }
-                } catch (error) {
-                  reject(error);
-                }
-              });
-            })()
-          `).then(result => {
-            console.log('[MAIN] Fill 执行成功:', result);
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ 
-              success: true, 
-              message: 'Fill executed successfully',
-              result: result
-            }));
-          }).catch(error => {
-            console.error('[MAIN] Fill 执行失败:', error.message);
-            console.error('[MAIN] Fill 错误堆栈:', error.stack);
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: error.message }));
-          });
-        } catch (error) {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, message: error.message }));
-        }
-      } else {
-        res.writeHead(503, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
-      }
-      return;
-    }
-    
-    // 添加获取页面信息路由处理
-    if (pathname === '/browser/getPageInfo' && req.method === 'GET') {
-      // 在 BrowserView 中获取页面信息
-      if (browserView) {
-        try {
-          // 使用 evaluate 在页面中获取页面信息
-          browserView.webContents.executeJavaScript(`
-            new Promise((resolve) => {
-              resolve({
-                url: window.location.href,
-                title: document.title
-              });
-            });
-          `).then(result => {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ 
-              success: true, 
-              message: 'Page info retrieved successfully',
-              result: result
-            }));
-          }).catch(error => {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: error.message }));
-          });
-        } catch (error) {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, message: error.message }));
-        }
-      } else {
-        res.writeHead(503, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
-      }
-      return;
-    }
-    
-    // 按键路由
-    if (pathname === '/browser/press' && req.method === 'GET') {
-      const key = parsedUrl.query.key;
-      if (!key) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, message: 'Missing key parameter' }));
-        return;
-      }
-      
-      if (browserView) {
-        try {
-          browserView.webContents.sendInputEvent({ type: 'keyDown', keyCode: key });
-          browserView.webContents.sendInputEvent({ type: 'keyUp', keyCode: key });
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: true, message: `Pressed key: ${key}` }));
-        } catch (error) {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, message: error.message }));
-        }
-      } else {
-        res.writeHead(503, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
-      }
-      return;
-    }
-    
-    // 获取页面URL
-    if (pathname === '/browser/getPageUrl' && req.method === 'GET') {
-      if (browserView) {
-        try {
-          browserView.webContents.executeJavaScript('window.location.href').then(url => {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true, url }));
-          }).catch(error => {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: error.message }));
-          });
-        } catch (error) {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, message: error.message }));
-        }
-      } else {
-        res.writeHead(503, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
-      }
-      return;
-    }
-    
-    // 获取页面标题
-    if (pathname === '/browser/getPageTitle' && req.method === 'GET') {
-      if (browserView) {
-        try {
-          browserView.webContents.executeJavaScript('document.title').then(title => {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: true, title }));
-          }).catch(error => {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: error.message }));
-          });
-        } catch (error) {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, message: error.message }));
-        }
-      } else {
-        res.writeHead(503, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
-      }
-      return;
-    }
-    
-    // 添加获取页面HTML路由处理
-    if (pathname === '/browser/getVisibleHtml' && req.method === 'GET') {
-      const selector = parsedUrl.query.selector || 'html';
-      const cleanHtml = parsedUrl.query.cleanHtml === 'true';
-      
-      // 在 BrowserView 中获取页面HTML
-      if (browserView) {
-        try {
-          // 使用 evaluate 在页面中获取HTML内容
-          browserView.webContents.executeJavaScript(`
-            new Promise((resolve, reject) => {
-              try {
-                let container = document.querySelector('${selector}') || document.documentElement;
-                if (!container) {
-                  reject(new Error('Container element not found: ${selector}'));
-                  return;
-                }
-                
-                // 克隆节点以避免修改原始DOM
-                let clone = container.cloneNode(true);
-                
-                // 如果需要清理HTML，则移除script、style等元素
-                if (${cleanHtml}) {
-                  // 移除script标签
-                  clone.querySelectorAll('script').forEach(el => el.remove());
-                  // 移除style标签
-                  clone.querySelectorAll('style').forEach(el => el.remove());
-                  // 移除link标签（通常用于加载CSS）
-                  clone.querySelectorAll('link').forEach(el => el.remove());
-                  // 移除meta标签
-                  clone.querySelectorAll('meta').forEach(el => el.remove());
-                }
-                
-                resolve(clone.outerHTML);
-              } catch (error) {
-                reject(error);
-              }
-            });
-          `).then(html => {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ 
-              success: true, 
-              message: 'HTML content retrieved successfully',
-              result: html
-            }));
-          }).catch(error => {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: error.message }));
-          });
-        } catch (error) {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, message: error.message }));
-        }
-      } else {
-        res.writeHead(503, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
-      }
-      return;
-    }
-    
-    // 添加获取页面可见文本路由处理
-    if (pathname === '/browser/getVisibleText' && req.method === 'GET') {
-      const selector = parsedUrl.query.selector || 'body';
-      
-      // 在 BrowserView 中获取页面可见文本
-      if (browserView) {
-        try {
-          // 使用 evaluate 在页面中获取可见文本内容
-          browserView.webContents.executeJavaScript(`
-            new Promise((resolve, reject) => {
-              try {
-                let container = document.querySelector('${selector}');
-                if (!container) {
-                  // 尝试使用 body 作为容器
-                  if (document.body) {
-                    container = document.body;
-                  } else {
-                    reject(new Error('No suitable container element found'));
-                    return;
-                  }
-                }
-                
-                // 获取所有可见文本
-                function getVisibleText(element) {
-                  let text = '';
-                  
-                  // 如果是文本节点，直接返回文本内容
-                  if (element.nodeType === Node.TEXT_NODE) {
-                    return element.textContent.trim();
-                  }
-                  
-                  // 如果是元素节点，检查是否可见
-                  if (element.nodeType === Node.ELEMENT_NODE) {
-                    // 跳过script和style标签
-                    if (element.tagName === 'SCRIPT' || element.tagName === 'STYLE') {
-                      return '';
-                    }
-                    
-                    // 检查元素是否可见
-                    const style = window.getComputedStyle(element);
-                    if (style.display !== 'none' && style.visibility !== 'hidden' && style.opacity !== '0') {
-                      // 处理子节点
-                      for (let child of element.childNodes) {
-                        text += getVisibleText(child);
-                      }
-                      
-                      // 在块级元素后添加换行
-                      const display = style.display;
-                      if (display === 'block' || display === 'flex' || display === 'grid' || display === 'list-item') {
-                        text += '\\n';
-                      }
-                    }
-                  }
-                  
-                  return text;
-                }
-                
-                const result = getVisibleText(container);
-                resolve(result.trim());
-              } catch (error) {
-                reject(error);
-              }
-            });
-          `).then(text => {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ 
-              success: true, 
-              message: 'Visible text retrieved successfully',
-              result: text
-            }));
-          }).catch(error => {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: error.message }));
-          });
-        } catch (error) {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, message: error.message }));
-        }
-      } else {
-        res.writeHead(503, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
-      }
-      return;
-    }
-    
-    // 添加执行JavaScript路由处理
-    if (pathname === '/browser/executeJs' && req.method === 'POST') {
-      let body = '';
-      req.on('data', chunk => {
-        body += chunk.toString();
-      });
-      
-      req.on('end', () => {
-        try {
-          const { script } = JSON.parse(body);
-          
-          if (!script) {
-            res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'Script is required' }));
-            return;
-          }
-          
-          // 在 BrowserView 中执行JavaScript
-          if (browserView) {
-            browserView.webContents.executeJavaScript(script)
-              .then(result => {
-                res.writeHead(200, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ 
-                  success: true, 
-                  message: 'JavaScript executed successfully',
-                  result: result
-                }));
-              })
-              .catch(error => {
-                console.error('ExecuteJS Error:', error);
-                res.writeHead(500, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ 
-                  success: false, 
-                  message: error.message,
-                  stack: error.stack,
-                  name: error.name
-                }));
-              });
-          } else {
-            res.writeHead(503, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
-          }
-        } catch (error) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, message: 'Invalid JSON' }));
-        }
-      });
-      return;
-    }
-    
-    // 添加页面分析路由处理
-    if (pathname === '/browser/analyzePage' && req.method === 'GET') {
-      // 在 BrowserView 中分析页面
-      if (browserView) {
-        try {
-          // 使用 evaluate 在页面中执行页面分析
-          browserView.webContents.executeJavaScript(`
-            new Promise((resolve, reject) => {
-              try {
-                const pageInfo = {
-                  url: window.location.href,
-                  title: document.title,
-                  timestamp: new Date().toISOString()
-                };
-                
-                // 获取页面基本信息
-                const metaTags = Array.from(document.querySelectorAll('meta')).map(meta => ({
-                  name: meta.name || meta.property || 'unknown',
-                  content: meta.content
-                }));
-                
-                // 获取页面结构信息
-                const headings = Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6')).map(heading => ({
-                  tag: heading.tagName.toLowerCase(),
-                  text: heading.textContent.trim().substring(0, 100),
-                  id: heading.id || null
-                }));
-                
-                // 获取表单信息
-                const forms = Array.from(document.querySelectorAll('form')).map(form => ({
-                  action: form.action,
-                  method: form.method,
-                  inputCount: form.querySelectorAll('input, textarea, select').length
-                }));
-                
-                // 获取链接信息
-                const links = Array.from(document.querySelectorAll('a[href]')).slice(0, 20).map(link => ({
-                  text: link.textContent.trim().substring(0, 50),
-                  href: link.href
-                }));
-                
-                // 获取图片信息
-                const images = Array.from(document.querySelectorAll('img')).slice(0, 10).map(img => ({
-                  src: img.src,
-                  alt: img.alt || '',
-                  width: img.naturalWidth,
-                  height: img.naturalHeight
-                }));
-                
-                // 获取输入框信息
-                const inputs = Array.from(document.querySelectorAll('input, textarea')).map(input => ({
-                  type: input.type || 'text',
-                  name: input.name || input.id || '',
-                  placeholder: input.placeholder || '',
-                  required: input.required || false
-                }));
-                
-                // 获取按钮信息
-                const buttons = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"]')).map(button => ({
-                  text: button.textContent.trim() || button.value || '',
-                  type: button.type || 'button'
-                }));
-                
-                // 获取表格信息
-                const tables = Array.from(document.querySelectorAll('table')).map(table => ({
-                  rowCount: table.querySelectorAll('tr').length,
-                  columnCount: table.querySelectorAll('tr:first-child td, tr:first-child th').length
-                }));
-                
-                // 获取列表信息
-                const lists = Array.from(document.querySelectorAll('ul, ol')).map(list => ({
-                  type: list.tagName.toLowerCase(),
-                  itemCount: list.querySelectorAll('li').length
-                }));
-                
-                // 获取脚本和样式信息
-                const scripts = Array.from(document.querySelectorAll('script[src]')).map(script => script.src);
-                const stylesheets = Array.from(document.querySelectorAll('link[rel="stylesheet"]')).map(link => link.href);
-                
-                // 获取页面性能信息
-                const performance = window.performance && window.performance.timing ? {
-                  loadTime: window.performance.timing.loadEventEnd - window.performance.timing.navigationStart,
-                  domContentLoaded: window.performance.timing.domContentLoadedEventEnd - window.performance.timing.navigationStart
-                } : null;
-                
-                resolve({
-                  pageInfo,
-                  metaTags,
-                  headings,
-                  forms,
-                  links,
-                  images,
-                  inputs,
-                  buttons,
-                  tables,
-                  lists,
-                  scripts,
-                  stylesheets,
-                  performance
-                });
-              } catch (error) {
-                reject(error);
-              }
-            });
-          `).then(analysis => {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ 
-              success: true, 
-              message: 'Page analyzed successfully',
-              result: analysis
-            }));
-          }).catch(error => {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: error.message }));
-          });
-        } catch (error) {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, message: error.message }));
-        }
-      } else {
-        res.writeHead(503, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
-      }
-      return;
-    }
-    
-    // 添加控制台日志路由处理
-    if (pathname === '/browser/consoleLogs' && req.method === 'GET') {
-      const type = parsedUrl.query.type || 'all';
-      const limit = parseInt(parsedUrl.query.limit) || 50;
-      
-      // 在 BrowserView 中获取控制台日志
-      if (browserView) {
-        try {
-          browserView.webContents.executeJavaScript(`
-            new Promise((resolve, reject) => {
-              try {
-                const logs = [];
-                const consoleMethods = ['log', 'warn', 'error', 'info', 'debug'];
-                
-                // 重写 console 方法来捕获日志
-                consoleMethods.forEach(method => {
-                  const originalMethod = console[method];
-                  console[method] = function(...args) {
-                    if (logs.length < ${limit}) {
-                      logs.push({
-                        type: method,
-                        message: args.map(arg => 
-                          typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
-                        ).join(' '),
-                        timestamp: new Date().toISOString()
-                      });
-                    }
-                    // 调用原始方法
-                    originalMethod.apply(console, args);
-                  };
-                });
-                
-                // 等待一小段时间让日志积累
-                setTimeout(() => {
-                  resolve(logs);
-                }, 1000);
-                
-              } catch (error) {
-                reject(error);
-              }
-            });
-          `).then(logs => {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ 
-              success: true, 
-              message: 'Console logs retrieved successfully',
-              result: logs
-            }));
-          }).catch(error => {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: error.message }));
-          });
-        } catch (error) {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, message: error.message }));
-        }
-      } else {
-        res.writeHead(503, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
-      }
-      return;
-    }
 
-    // 添加截图路由处理
-    if (pathname === '/browser/screenshot' && req.method === 'GET') {
-      const fullPage = parsedUrl.query.fullPage === 'true';
-      const selector = parsedUrl.query.selector || null;
-      
-      // 在 BrowserView 中进行截图
-      if (browserView) {
+    // 辅助函数：发送成功响应
+    const sendSuccess = (data) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: true, ...data }));
+    };
+
+    // 辅助函数：发送错误响应
+    const sendError = (message, statusCode = 500) => {
+      res.writeHead(statusCode, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, message }));
+    };
+
+    try {
+      // ==================== 导航 ====================
+      if (pathname === '/browser/navigate' && req.method === 'GET') {
+        const targetUrl = parsedUrl.query.url;
+        if (!targetUrl) {
+          return sendError('Missing url parameter', 400);
+        }
+        
+        const decodedUrl = decodeURIComponent(targetUrl);
+        
+        // 使用 Playwright 导航（保持 page 引用一致）
         try {
-          const captureOptions = {
-            type: 'png',
-            encoding: 'base64'
-          };
-          
-          let capturePromise;
-          
-          if (selector) {
-            // 截图特定元素
-            capturePromise = browserView.webContents.executeJavaScript(`
-              new Promise((resolve, reject) => {
-                try {
-                  const element = document.querySelector('${selector}');
-                  if (!element) {
-                    reject(new Error('Element not found: ${selector}'));
-                    return;
-                  }
-                  
-                  const rect = element.getBoundingClientRect();
-                  resolve({
-                    x: Math.floor(rect.left),
-                    y: Math.floor(rect.top),
-                    width: Math.floor(rect.width),
-                    height: Math.floor(rect.height)
-                  });
-                } catch (error) {
-                  reject(error);
-                }
-              });
-            `).then(bounds => {
-              return browserView.webContents.capturePage({
-                x: bounds.x,
-                y: bounds.y,
-                width: bounds.width,
-                height: bounds.height
-              }, captureOptions);
-            });
-          } else if (fullPage) {
-            // 截图整个页面
-            capturePromise = browserView.webContents.executeJavaScript(`
-              new Promise((resolve) => {
-                const body = document.body;
-                const html = document.documentElement;
-                
-                const height = Math.max(
-                  body.scrollHeight,
-                  body.offsetHeight,
-                  html.clientHeight,
-                  html.scrollHeight,
-                  html.offsetHeight
-                );
-                
-                resolve(height);
-              });
-            `).then(pageHeight => {
-              // 调整 BrowserView 大小以适应整个页面
-              const currentBounds = browserView.getBounds();
-              browserView.setBounds({
-                ...currentBounds,
-                height: pageHeight
-              });
-              
-              // 等待调整完成
-              return new Promise(resolve => setTimeout(resolve, 500));
-            }).then(() => {
-              return browserView.webContents.capturePage(captureOptions);
-            });
-          } else {
-            // 截图当前视口
-            capturePromise = browserView.webContents.capturePage(captureOptions);
-          }
-          
-          capturePromise.then(image => {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ 
-              success: true, 
-              message: 'Screenshot captured successfully',
-              result: image
-            }));
-          }).catch(error => {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ success: false, message: error.message }));
+          const result = await playwrightManager.navigate(decodedUrl);
+          return sendSuccess({ 
+            message: 'Navigation completed',
+            url: result.url,
+            title: result.title
           });
         } catch (error) {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ success: false, message: error.message }));
+          // 如果 Playwright 导航失败，回退到 BrowserView 原生 API
+          console.log('[MAIN] Playwright 导航失败，使用原生 API:', error.message);
+          if (browserView) {
+            browserView.webContents.loadURL(decodedUrl);
+            // 等待页面加载后刷新 Playwright 连接
+            setTimeout(async () => {
+              try {
+                await playwrightManager.refreshPage();
+              } catch (e) {
+                console.log('[MAIN] Playwright 刷新页面引用:', e.message);
+              }
+            }, 2000);
+          }
+          return sendSuccess({ 
+            message: 'Navigation started (fallback)',
+            url: decodedUrl
+          });
         }
-      } else {
-        res.writeHead(503, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
       }
-      return;
+
+      // ==================== 点击 ====================
+      if (pathname === '/browser/click' && req.method === 'GET') {
+        const selector = parsedUrl.query.selector;
+        if (!selector) {
+          return sendError('Missing selector parameter', 400);
+        }
+        
+        const result = await playwrightManager.click(selector);
+        return sendSuccess({ message: 'Click executed successfully', result });
+      }
+
+      // ==================== 填充输入框 ====================
+      if (pathname === '/browser/fill' && req.method === 'GET') {
+        const selector = parsedUrl.query.selector;
+        const text = parsedUrl.query.text;
+        if (!selector || text === undefined) {
+          return sendError('Missing selector or text parameter', 400);
+        }
+        
+        const result = await playwrightManager.fill(selector, decodeURIComponent(text));
+        return sendSuccess({ message: 'Fill executed successfully', result });
+      }
+
+      // ==================== 按键 ====================
+      if (pathname === '/browser/press' && req.method === 'GET') {
+        const key = parsedUrl.query.key;
+        if (!key) {
+          return sendError('Missing key parameter', 400);
+        }
+        
+        const result = await playwrightManager.press(key);
+        return sendSuccess({ message: `Pressed key: ${key}`, result });
+      }
+
+      // ==================== 获取页面信息 ====================
+      if (pathname === '/browser/getPageInfo' && req.method === 'GET') {
+        const result = await playwrightManager.getPageInfo();
+        return sendSuccess({ message: 'Page info retrieved successfully', result });
+      }
+
+      // ==================== 获取页面 URL ====================
+      if (pathname === '/browser/getPageUrl' && req.method === 'GET') {
+        const url = await playwrightManager.getPageUrl();
+        return sendSuccess({ url });
+      }
+
+      // ==================== 获取页面标题 ====================
+      if (pathname === '/browser/getPageTitle' && req.method === 'GET') {
+        const title = await playwrightManager.getPageTitle();
+        return sendSuccess({ title });
+      }
+
+      // ==================== 获取可见文本 ====================
+      if (pathname === '/browser/getVisibleText' && req.method === 'GET') {
+        const selector = parsedUrl.query.selector || 'body';
+        const result = await playwrightManager.getVisibleText(selector);
+        return sendSuccess({ message: 'Visible text retrieved successfully', result });
+      }
+
+      // ==================== 获取 HTML ====================
+      if (pathname === '/browser/getVisibleHtml' && req.method === 'GET') {
+        const selector = parsedUrl.query.selector || 'html';
+        const cleanHtml = parsedUrl.query.cleanHtml === 'true';
+        const result = await playwrightManager.getVisibleHtml(selector, cleanHtml);
+        return sendSuccess({ message: 'HTML content retrieved successfully', result });
+      }
+
+      // ==================== 执行 JavaScript ====================
+      if (pathname === '/browser/executeJs' && req.method === 'POST') {
+        let body = '';
+        req.on('data', chunk => { body += chunk.toString(); });
+        
+        return new Promise((resolve) => {
+          req.on('end', async () => {
+            try {
+              const { script } = JSON.parse(body);
+              if (!script) {
+                sendError('Script is required', 400);
+                return resolve();
+              }
+              
+              const result = await playwrightManager.executeJs(script);
+              sendSuccess({ message: 'JavaScript executed successfully', result });
+              resolve();
+            } catch (error) {
+              sendError(error.message);
+              resolve();
+            }
+          });
+        });
+      }
+
+      // ==================== 截图 ====================
+      if (pathname === '/browser/screenshot' && req.method === 'GET') {
+        const fullPage = parsedUrl.query.fullPage === 'true';
+        const selector = parsedUrl.query.selector || null;
+        
+        const buffer = await playwrightManager.screenshot({ fullPage, selector });
+        const base64 = buffer.toString('base64');
+        return sendSuccess({ message: 'Screenshot captured successfully', result: base64 });
+      }
+
+      // ==================== 悬停 ====================
+      if (pathname === '/browser/hover' && req.method === 'GET') {
+        const selector = parsedUrl.query.selector;
+        if (!selector) {
+          return sendError('Missing selector parameter', 400);
+        }
+        
+        const result = await playwrightManager.hover(selector);
+        return sendSuccess({ message: 'Hover executed successfully', result });
+      }
+
+      // ==================== 选择下拉框 ====================
+      if (pathname === '/browser/select' && req.method === 'GET') {
+        const selector = parsedUrl.query.selector;
+        const value = parsedUrl.query.value;
+        if (!selector || !value) {
+          return sendError('Missing selector or value parameter', 400);
+        }
+        
+        const result = await playwrightManager.select(selector, value);
+        return sendSuccess({ message: 'Select executed successfully', result });
+      }
+
+      // ==================== 等待元素 ====================
+      if (pathname === '/browser/waitForSelector' && req.method === 'GET') {
+        const selector = parsedUrl.query.selector;
+        if (!selector) {
+          return sendError('Missing selector parameter', 400);
+        }
+        
+        const result = await playwrightManager.waitForSelector(selector);
+        return sendSuccess({ message: 'Element found', result });
+      }
+
+      // ==================== 调试：获取输入框信息 ====================
+      if (pathname === '/browser/debug/inputs' && req.method === 'GET') {
+        const inputs = await playwrightManager.getInputs();
+        return sendSuccess({ inputs });
+      }
+
+      // ==================== 分析页面 ====================
+      if (pathname === '/browser/analyzePage' && req.method === 'GET') {
+        const result = await playwrightManager.analyzePage();
+        return sendSuccess({ message: 'Page analyzed successfully', result });
+      }
+
+      // ==================== 控制台日志（使用 Playwright evaluate）====================
+      if (pathname === '/browser/consoleLogs' && req.method === 'GET') {
+        // 注：Playwright 原生支持 console 事件监听，这里用简化实现
+        const result = await playwrightManager.executeJs(`
+          (function() {
+            return window.__consoleLogs || [];
+          })()
+        `);
+        return sendSuccess({ message: 'Console logs retrieved', result: result || [] });
+      }
+
+      // ==================== Playwright 连接状态 ====================
+      if (pathname === '/browser/status' && req.method === 'GET') {
+        return sendSuccess({ 
+          connected: playwrightManager.isConnected(),
+          message: playwrightManager.isConnected() ? 'Playwright connected' : 'Playwright not connected'
+        });
+      }
+
+      // ==================== 重新连接 Playwright ====================
+      if (pathname === '/browser/reconnect' && req.method === 'GET') {
+        await playwrightManager.connect(PLAYWRIGHT_DEBUG_PORT);
+        return sendSuccess({ message: 'Playwright reconnected' });
+      }
+
+      // 默认路由
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: false, message: 'Not found' }));
+
+    } catch (error) {
+      console.error('[MAIN] 控制服务器错误:', error.message);
+      sendError(error.message);
     }
-    
-    // 默认路由
-    res.writeHead(404, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ success: false, message: 'Not found' }));
   });
   
-  // 同时监听 IPv4 和 IPv6 地址
+  // 监听端口
   controlServer.listen(CONTROL_PORT, '0.0.0.0', () => {
     console.log(`[MAIN] 远程控制服务器启动于 http://0.0.0.0:${CONTROL_PORT}`);
-  });
-  
-  // 同时监听 IPv6
-  controlServer.listen(CONTROL_PORT, '::', () => {
-    console.log(`[MAIN] 远程控制服务器启动于 http://[::]:${CONTROL_PORT}`);
+    
+    // 延迟连接 Playwright（等待 BrowserView 初始化完成）
+    setTimeout(async () => {
+      try {
+        await playwrightManager.connect(PLAYWRIGHT_DEBUG_PORT);
+        console.log('[MAIN] Playwright 已连接到 BrowserView');
+      } catch (error) {
+        console.log('[MAIN] Playwright 连接延迟，将在首次请求时连接:', error.message);
+      }
+    }, 3000);
   });
   
   controlServer.on('error', (error) => {
@@ -1118,6 +421,11 @@ function stopControlServer() {
     });
     controlServer = null;
   }
+  
+  // 断开 Playwright 连接
+  playwrightManager.disconnect().catch(err => {
+    console.log('[MAIN] Playwright 断开连接:', err.message);
+  });
 }
 
 // 检查端口是否可用
@@ -1162,53 +470,53 @@ async function startBackendService() {
   });
 }
 
-// 启动 Node.js 后端
+// 启动 Node.js 后端（直接在主进程中运行）
+let nodeBackendServer = null;
+
 async function startNodeJsBackend(resolve, reject) {
   console.log('[MAIN] 启动 Node.js 后端服务...');
   
-  // 确定 Node.js 后端路径
-  const nodePath = isDev 
-    ? path.join(__dirname, '../node-mcp-backend/src/server.js')
-    : path.join(process.resourcesPath, 'app.asar.unpacked/node-backend/server.js');
-  
-  console.log('[MAIN] Node.js 后端路径:', nodePath);
-  console.log('[MAIN] 文件是否存在:', require('fs').existsSync(nodePath));
-
-  // 启动 Node.js 应用
-  backendProcess = spawn('node', [nodePath], {
-    cwd: path.dirname(nodePath),
-    env: {
-      ...process.env,
-      NODE_ENV: 'production',
-      PORT: BACKEND_PORT.toString()
-    }
-  });
-
-  backendProcess.stdout.on('data', (data) => {
-    const output = data.toString();
-    console.log(`[NODE.JS BACKEND] ${output}`);
+  try {
+    const fs = require('fs');
     
-    // 检查服务是否启动完成（监听成功消息）
-    if (output.includes('服务器已启动') || output.includes('Server started') || output.includes(`port ${BACKEND_PORT}`) || output.includes(`端口: ${BACKEND_PORT}`)) {
-      console.log('[MAIN] Node.js 后端服务启动成功');
-      setTimeout(() => {
-        resolve({ port: BACKEND_PORT, started: true });
-      }, 1000); // 等待 1 秒确保服务完全启动
+    // 确定 Node.js 后端路径
+    const serverPath = isDev 
+      ? path.join(__dirname, 'node-backend/src/server.js')
+      : path.join(process.resourcesPath, 'app.asar.unpacked/node-backend/src/server.js');
+    
+    const backendDir = path.dirname(path.dirname(serverPath));
+    const envPath = path.join(backendDir, '.env');
+    const envExamplePath = path.join(backendDir, '.env.example');
+    
+    console.log('[MAIN] Node.js 后端路径:', serverPath);
+    console.log('[MAIN] 后端目录:', backendDir);
+    console.log('[MAIN] 文件是否存在:', fs.existsSync(serverPath));
+    
+    // 检查 .env 文件
+    if (!fs.existsSync(envPath) && fs.existsSync(envExamplePath)) {
+      console.log('[MAIN] .env 文件不存在，从 .env.example 创建...');
+      fs.copyFileSync(envExamplePath, envPath);
     }
-  });
-
-  backendProcess.stderr.on('data', (data) => {
-    console.error(`[NODE.JS BACKEND ERROR] ${data}`);
-  });
-
-  backendProcess.on('error', (error) => {
+    
+    // 设置环境变量
+    process.env.PORT = BACKEND_PORT.toString();
+    process.env.NODE_ENV = isDev ? 'development' : 'production';
+    
+    // 直接 require 后端模块（CommonJS）
+    console.log('[MAIN] 加载后端模块:', serverPath);
+    const serverModule = require(serverPath);
+    
+    // 调用 startServer 启动服务
+    const result = await serverModule.startServer(BACKEND_PORT);
+    nodeBackendServer = result.server;
+    
+    console.log('[MAIN] Node.js 后端服务启动成功');
+    resolve({ port: BACKEND_PORT, started: true });
+    
+  } catch (error) {
     console.error('[MAIN] 启动 Node.js 后端服务失败:', error);
     reject(error);
-  });
-
-  backendProcess.on('exit', (code) => {
-    console.log(`[MAIN] Node.js 后端服务退出, 退出码: ${code}`);
-  });
+  }
 }
 
 // 启动 Spring Boot 后端
@@ -1251,7 +559,11 @@ async function startSpringBootBackend(resolve, reject) {
 
 // 停止后端服务
 function stopBackendService() {
-  if (backendProcess) {
+  if (BACKEND_TYPE === 'nodejs' && nodeBackendServer) {
+    console.log('[MAIN] 停止 Node.js 后端服务...');
+    nodeBackendServer.close();
+    nodeBackendServer = null;
+  } else if (backendProcess) {
     console.log(`[MAIN] 停止${BACKEND_TYPE === 'nodejs' ? 'Node.js' : 'Spring Boot'}后端服务...`);
     backendProcess.kill('SIGTERM');
     backendProcess = null;
@@ -1373,9 +685,19 @@ ipcMain.handle('check-service-status', async () => {
 // 处理 spring-boot-status IPC 请求（保持兼容性）
 ipcMain.handle('spring-boot-status', async () => {
   try {
+    // Node.js 后端直接检查服务实例（主进程内运行）
+    if (BACKEND_TYPE === 'nodejs') {
+      return {
+        running: nodeBackendServer !== null,
+        port: BACKEND_PORT,
+        type: BACKEND_TYPE
+      };
+    }
+    
+    // Spring Boot 用端口检测
     const available = await isPortAvailable(BACKEND_PORT);
     return {
-      running: !available, // 端口被占用表示服务正在运行
+      running: !available,
       port: BACKEND_PORT,
       type: BACKEND_TYPE
     };

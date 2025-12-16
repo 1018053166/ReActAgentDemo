@@ -232,7 +232,7 @@ graph TB
 
 ### 添加新工具
 
-1. 在 `node-mcp-backend/src/tools/` 创建工具文件
+1. 在 `node-backend/src/tools/` 创建工具文件
 2. 定义 `getToolDefinitions()` 和 `executeTool()` 方法
 3. 在 `toolRegistry.js` 中注册
 4. 重启服务生效（无需重新打包）
@@ -266,7 +266,7 @@ export class MyTools {
 
 ### 修改 AI 提示词
 
-编辑 `node-mcp-backend/src/agent/reactAgent.js`：
+编辑 `node-backend/src/agent/reactAgent.js`：
 
 ```javascript
 buildSystemPrompt() {
@@ -279,7 +279,7 @@ buildSystemPrompt() {
 
 ### 调整工具集合
 
-编辑 `node-mcp-backend/src/tools/playwrightTools.js`：
+编辑 `node-backend/src/tools/playwrightTools.js`：
 ```javascript
 static getToolDefinitions() {
   return [
