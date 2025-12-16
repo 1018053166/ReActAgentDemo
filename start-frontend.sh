@@ -2,7 +2,7 @@
 
 ###############################################################################
 # Electron 客户端编译启动脚本
-# 功能：编译 React UI → 启动 Electron 客户端（自动启动内嵌 Spring Boot）
+# 功能：编译 React UI → 启动 Electron 客户端（自动启动内嵌 Node.js 后端）
 # 用法：
 #   ./start-frontend.sh              # 开发模式启动（支持热重载）
 #   ./start-frontend.sh --build      # 编译后启动（生产模式）
@@ -50,7 +50,7 @@ fi
 echo ""
 echo "╔════════════════════════════════════════════════════════════════╗"
 echo "║         Electron 客户端启动脚本                               ║"
-echo "║         React UI + BrowserView + Spring Boot                  ║"
+echo "║         React UI + BrowserView + Node.js Backend              ║"
 echo "╚════════════════════════════════════════════════════════════════╝"
 echo ""
 
@@ -106,22 +106,12 @@ fi
 log_info "步骤 3/3: 启动 Electron 客户端..."
 cd "$FRONTEND_DIR"
 
-# 检查后端 JAR 是否存在
-JAR_FILE="$FRONTEND_DIR/spring-boot-server/react-mcp-demo-0.0.1-SNAPSHOT.jar"
-if [ ! -f "$JAR_FILE" ]; then
-    log_error "未找到后端 JAR 文件: $JAR_FILE"
-    log_error "请先运行后端编译脚本: ./start-backend.sh 或 ./build-package.sh"
-    exit 1
-fi
-
-log_success "检测到后端 JAR 文件: $JAR_FILE"
-
-# 检查端口 8080 是否被占用
+# 检查端口 8080（Node.js 后端端口）
 log_info "检查端口 8080..."
 if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null 2>&1; then
-    log_warning "端口 8080 已被占用，客户端将连接到现有服务"
+    log_warning "端口 8080 已被占用，客户端将连接到现有 Node.js 后端服务"
 else
-    log_info "端口 8080 空闲，客户端将自动启动内嵌 Spring Boot 服务"
+    log_info "端口 8080 空闲，Electron 启动后将自动拉起内嵌 Node.js 后端"
 fi
 
 # 启动 Electron
