@@ -1,6 +1,8 @@
 # ReAct MCP 智能代理客户端
 
-基于 ReAct 框架的智能代理系统，集成 Playwright 浏览器自动化能力，采用 Electron + Spring Boot 一体化架构，开箱即用的 AI 自动化工具案例。
+基于 ReAct 框架的智能代理系统,集成 Playwright 浏览器自动化能力,采用 **Electron + Node.js** 一体化架构,开箱即用的 AI 自动化工具。
+
+> **技术架构**:Electron 桌面应用 + 嵌入式 Node.js 后端 + Qwen AI 模型
 
 
 ## 📐 系统架构
@@ -9,37 +11,41 @@
 
 ```mermaid
 graph TB
-    subgraph electron["Electron客户端"]
-        UI["React UI<br/>控制面板"]
-        BV["BrowserView<br/>浏览器视图"]
-        Main["Main Process<br/>主进程"]
+    subgraph electron["Electron 客户端（原生开发）"]
+        UI["React UI<br/>控制面板（30%左侧）"]
+        BV["BrowserView<br/>浏览器视图（70%右侧）"]
+        Main["Main Process<br/>主进程 + 子进程管理"]
         Preload["Preload Script<br/>预加载脚本"]
         Remote["Remote Control<br/>HTTP Server :9222"]
     end
     
-    subgraph springboot["Spring Boot后端"]
-        API["REST API<br/>:8080"]
-        ReAct["ReAct Engine<br/>langchain4j"]
-        Qwen["Qwen AI Model<br/>qwen3-max"]
-        Tools["Playwright Tools<br/>浏览器自动化"]
-        Memory["Chat Memory<br/>上下文管理"]
+    subgraph nodejs["Node.js 后端（子进程）"]
+        API["Express Server<br/>:8080"]
+        ReAct["ReAct Agent<br/>自定义实现"]
+        Qwen["Qwen AI Model<br/>qwen-turbo"]
+        Tools["Tool Registry<br/>工具注册中心"]
+        PlaywrightTools["Playwright Tools<br/>浏览器自动化"]
+        MathTools["Math Tools<br/>数学计算"]
+        FileTools["File Tools<br/>文件操作"]
     end
     
     User(("用户")) --> UI
     UI -->|"IPC"| Main
-    UI -->|"HTTP"| API
-    Main -->|"启动"| API
+    UI -->|"HTTP/SSE"| API
+    Main -->|"spawn('node')"| API
     Main -->|"控制"| BV
     API -->|"流式输出"| UI
     API --> ReAct
     ReAct --> Qwen
     ReAct --> Tools
-    ReAct --> Memory
-    Tools -->|"HTTP"| Remote
-    Remote -->|"CDP(Chrome DevTools Protocol)"| BV
+    Tools --> PlaywrightTools
+    Tools --> MathTools
+    Tools --> FileTools
+    PlaywrightTools -->|"HTTP :9222"| Remote
+    Remote -->|"BrowserView API"| BV
     
     style electron fill:#e1f5ff
-    style springboot fill:#fff4e1
+    style nodejs fill:#c8e6c9
     style User fill:#f0f0f0
 ```
 
@@ -47,40 +53,40 @@ graph TB
 
 ```mermaid
 graph TD
-    subgraph 表现层
-        UI[React UI 控制面板<br/>- 任务输入<br/>- 执行日志<br/>- 案例按钮]
-        BrowserView[BrowserView 浏览器<br/>- 独立渲染进程<br/>- DevTools 支持]
+    subgraph UI["表现层"]
+        A["React UI 控制面板<br/>任务输入、执行日志、案例按钮"]
+        B["BrowserView 浏览器<br/>独立渲染进程、DevTools"]
     end
     
-    subgraph 进程间通信层
-        IPC[IPC Communication<br/>- ipcMain.handle<br/>- ipcRenderer.invoke]
-        Preload[Preload Bridge<br/>- contextBridge<br/>- electronAPI 暴露]
+    subgraph IPC["进程间通信层"]
+        C["IPC Communication<br/>ipcMain.handle"]
+        D["Preload Bridge<br/>contextBridge"]
     end
     
-    subgraph 主进程层
-        Main[Main Process<br/>- 窗口管理<br/>- 生命周期控制]
-        SpringBoot[Spring Boot Launcher<br/>- 端口检测<br/>- 进程启动<br/>- JAR 加载]
-        RemoteServer[Remote Control Server<br/>- HTTP :9222<br/>- 浏览器控制 API]
+    subgraph Main["主进程层"]
+        E["Main Process<br/>窗口管理"]
+        F["Node.js Launcher<br/>端口检测、spawn"]
+        G["Remote Server<br/>HTTP :9222"]
     end
     
-    subgraph 资源层
-        JAR[Spring Boot JAR<br/>- 开发: target/*.jar<br/>- 打包: app.asar.unpacked/*.jar]
-        HTML[React UI Build<br/>- 开发: public/index.html<br/>- 打包: extraResources/build/]
+    subgraph Resources["资源层"]
+        H["Node.js 后端<br/>server.js"]
+        I["React UI Build<br/>index.html"]
     end
     
-    UI -->|事件| Preload
-    BrowserView -->|CDP| RemoteServer
-    Preload -->|安全隔离| IPC
-    IPC --> Main
-    Main --> SpringBoot
-    Main --> RemoteServer
-    SpringBoot -->|spawn| JAR
-    Main -->|loadFile| HTML
+    A --> D
+    B --> G
+    D --> C
+    C --> E
+    E --> F
+    E --> G
+    F --> H
+    E --> I
     
-    style 表现层 fill:#e8f5e9
-    style 进程间通信层 fill:#fff3e0
-    style 主进程层 fill:#e3f2fd
-    style 资源层 fill:#f3e5f5
+    style UI fill:#e8f5e9
+    style IPC fill:#fff3e0
+    style Main fill:#e3f2fd
+    style Resources fill:#f3e5f5
 ```
 
 ### IPC 通信流程
@@ -91,23 +97,23 @@ sequenceDiagram
     participant UI as React UI<br/>(渲染进程)
     participant Preload as Preload Script<br/>(隔离层)
     participant Main as Main Process<br/>(主进程)
-    participant SpringBoot as Spring Boot<br/>(子进程)
+    participant NodeBackend as Node.js Backend<br/>(子进程)
     
     User->>UI: 1. 输入任务
-    UI->>Preload: 2. window.electronAPI.invoke('spring-boot-status')
-    Preload->>Main: 3. ipcMain.handle('spring-boot-status')
+    UI->>Preload: 2. window.electronAPI.invoke('get-service-info')
+    Preload->>Main: 3. ipcMain.handle('get-service-info')
     Main->>Main: 4. 检测端口 :8080
-    Main-->>Preload: 5. return {running: true, port: 8080}
+    Main-->>Preload: 5. return {running: true, port: 8080, type: 'nodejs'}
     Preload-->>UI: 6. Promise resolve
     
-    UI->>SpringBoot: 7. HTTP GET /react/solve-stream?task=...
-    SpringBoot-->>UI: 8. SSE 流式响应
+    UI->>NodeBackend: 7. HTTP GET /react/solve-stream?task=...
+    NodeBackend-->>UI: 8. SSE 流式响应
     
-    Note over UI,SpringBoot: 前后端通过 HTTP 通信<br/>主进程与渲染进程通过 IPC 通信
+    Note over UI,NodeBackend: 前后端通过 HTTP 通信<br/>主进程与渲染进程通过 IPC 通信
     
-    SpringBoot->>Main: 9. HTTP POST /browser/navigate
+    NodeBackend->>Main: 9. HTTP POST /browser/navigate
     Main->>Main: 10. BrowserView.loadURL()
-    Main-->>SpringBoot: 11. {success: true}
+    Main-->>NodeBackend: 11. {success: true}
 ```
 
 ### Electron 安装与执行逻辑
@@ -120,16 +126,16 @@ graph TD
     C --> D[Main Process 启动]
     D --> E{检测端口 :8080}
     
-    E -->|端口空闲| F[启动 Spring Boot 服务]
+    E -->|端口空闲| F[启动 Node.js 后端服务]
     E -->|端口占用| G[连接已运行服务]
     
-    F --> H[spawn java -jar]
-    H --> I{JAR 文件路径判断}
+    F --> H[spawn node server.js]
+    H --> I{Node.js 文件路径判断}
     
-    I -->|开发模式<br/>isDev=true| J[加载 ../react-mcp-demo/target/*.jar]
-    I -->|打包模式<br/>isDev=false| K[加载 app.asar.unpacked/spring-boot-server/*.jar]
+    I -->|开发模式<br/>isDev=true| J[加载 ../node-mcp-backend/src/server.js]
+    I -->|打包模式<br/>isDev=false| K[加载 app.asar.unpacked/node-backend/server.js]
     
-    J --> L[等待服务启动<br/>监听日志: Started ReactMcpApplication]
+    J --> L[等待服务启动<br/>监听日志: 服务器已启动]
     K --> L
     G --> L
     
@@ -165,8 +171,10 @@ ReAct MCP 客户端.app/
 │   │   │   ├── preload.js
 │   │   │   └── node_modules/
 │   │   ├── app.asar.unpacked/      # 不压缩的资源
-│   │   │   └── spring-boot-server/
-│   │   │       └── react-mcp-demo-0.0.1-SNAPSHOT.jar
+│   │   │   └── node-backend/
+│   │   │       ├── src/
+│   │   │       │   └── server.js   # Node.js 后端入口
+│   │   │       └── node_modules/
 │   │   └── react-ui/
 │   │       └── build/
 │   │           └── index.html       # React UI 构建文件
@@ -185,37 +193,31 @@ MCP/
 │   │   ├── public/
 │   │   │   └── index.html          # 主界面（开发模式）
 │   │   └── build/                   # 构建产物（打包模式）
-│   ├── spring-boot-server/          # Spring Boot JAR 存放
-│   │   └── react-mcp-demo-0.0.1-SNAPSHOT.jar
 │   └── dist/                        # 打包输出目录
 │       └── ReAct MCP 客户端-1.0.0.dmg
 │
-└── react-mcp-demo/                  # Spring Boot 后端项目
-    ├── src/main/java/
-    │   └── com/example/reactmcp/
-    │       ├── agent/               # ReAct Agent 接口
-    │       │   └── McpAssistant.java
-    │       ├── config/              # langchain4j 配置
-    │       │   └── LangchainConfig.java
-    │       ├── tools/               # Playwright MCP 工具
-    │       │   └── PlaywrightMcpTools.java
-    │       └── web/                 # REST API 控制器
-    │           └── AgentController.java
-    ├── src/main/resources/
-    │   ├── application.yml          # 配置文件
-    │   └── static/                  # 静态资源
-    ├── pom.xml
-    └── target/
-        └── react-mcp-demo-0.0.1-SNAPSHOT.jar
+└── node-mcp-backend/                # Node.js 后端项目
+    ├── src/
+    │   ├── server.js                # 后端入口
+    │   ├── agent/
+    │   │   └── reactAgent.js        # ReAct Agent 实现
+    │   ├── tools/
+    │   │   ├── toolRegistry.js      # 工具注册中心
+    │   │   ├── mathTools.js         # 数学工具
+    │   │   ├── fileTools.js         # 文件工具
+    │   │   └── playwrightTools.js   # 浏览器工具
+    │   └── config/
+    │       └── llmConfig.js         # LLM 配置
+    └── package.json
 ```
 
 ## 🛠 技术栈
 
 ### 后端技术
-- **Java 17** + **Spring Boot 3.5.8** - 企业级应用框架
-- **langchain4j 0.36.2** - AI 编排框架
-- **Qwen3-Max** - 通义千问大语言模型
-- **ReAct 框架** - 推理与行动循环（Reasoning + Acting）
+- **Node.js 18+** - JavaScript 运行时环境
+- **Express 4.x** - Web 应用框架
+- **OpenAI SDK** - AI 模型集成（兼容 Qwen）
+- **ReAct 框架** - 自定义实现（推理与行动循环）
 - **Playwright** - 浏览器自动化引擎
 - **SSE (Server-Sent Events)** - 流式输出协议
 
@@ -227,27 +229,15 @@ MCP/
 - **electron-builder** - 应用打包工具
 
 ### 核心依赖
-```xml
-<!-- langchain4j -->
-<dependency>
-    <groupId>dev.langchain4j</groupId>
-    <artifactId>langchain4j</artifactId>
-    <version>0.36.2</version>
-</dependency>
-
-<!-- Qwen 模型 -->
-<dependency>
-    <groupId>dev.langchain4j</groupId>
-    <artifactId>langchain4j-dashscope</artifactId>
-    <version>0.36.2</version>
-</dependency>
-
-<!-- Playwright -->
-<dependency>
-    <groupId>com.microsoft.playwright</groupId>
-    <artifactId>playwright</artifactId>
-    <version>1.49.0</version>
-</dependency>
+```json
+{
+  "dependencies": {
+    "express": "^4.18.0",
+    "openai": "^4.0.0",
+    "playwright": "^1.40.0",
+    "dotenv": "^16.0.0"
+  }
+}
 ```
 
 ## ✨ 核心功能
@@ -285,9 +275,9 @@ MCP/
 
 ### 3. 一体化部署
 - **开箱即用**：双击安装，无需配置环境
-- **自动启动**：Electron 自动检测并启动 Spring Boot 服务
+- **自动启动**：Electron 自动检测并启动 Node.js 后端服务
 - **进程管理**：退出时自动清理后端进程
-- **资源隔离**：JAR 文件在 `app.asar.unpacked` 中独立存放
+- **资源隔离**：Node.js 后端在 `app.asar.unpacked` 中独立存放
 
 ### 4. 流式交互体验
 - **SSE 长连接**：实时推送 AI 思考过程
@@ -302,64 +292,46 @@ MCP/
 
 #### 1. 安装包打包脚本 `build-package.sh`
 
-**完整流程**（编译后端 + 打包客户端）：
+**完整流程**(编译 React UI + 打包客户端):
 ```bash
 ./build-package.sh
 ```
 
-**跳过后端编译**（仅打包客户端）：
-```bash
-./build-package.sh --skip-backend
-```
-
-**功能说明**：
-- ✅ 自动编译 Spring Boot 后端
-- ✅ 复制 JAR 文件到客户端项目
+**功能说明**:
 - ✅ 编译 React UI
-- ✅ 打包生成安装包（DMG/EXE/AppImage）
+- ✅ 复制 Node.js 后端到打包目录
+- ✅ 打包生成安装包(DMG/EXE/AppImage)
 - ✅ 显示打包产物位置和大小
 
 #### 2. 客户端启动脚本 `start-frontend.sh`
 
-**开发模式启动**（推荐，支持热重载）：
+**开发模式启动**(推荐,支持热重载):
 ```bash
 ./start-frontend.sh
 ```
 
-**生产模式启动**（先编译再启动）：
+**生产模式启动**(先编译再启动):
 ```bash
 ./start-frontend.sh --build
 ```
 
-**功能说明**：
+**功能说明**:
 - ✅ 自动检查并安装依赖
-- ✅ 验证后端 JAR 文件存在
 - ✅ 检测端口占用情况
 - ✅ 启动 Electron 客户端
-- ✅ 自动启动内嵌 Spring Boot 服务
+- ✅ 自动启动内嵌 Node.js 后端服务
 
 #### 3. 后端启动脚本 `start-backend.sh`
 
-**编译并启动**：
+**启动 Node.js 后端**:
 ```bash
-./start-backend.sh
+cd node-mcp-backend
+npm start
 ```
 
-**跳过编译，直接启动**：
-```bash
-./start-backend.sh --skip-build
-```
-
-**编译并复制到客户端目录**：
-```bash
-./start-backend.sh --copy-to-frontend
-```
-
-**功能说明**：
-- ✅ 自动检查端口占用（支持交互式停止现有服务）
-- ✅ Maven 编译后端项目
-- ✅ 可选复制 JAR 到客户端目录
-- ✅ 启动 Spring Boot 服务
+**功能说明**:
+- ✅ 自动检查端口占用
+- ✅ 启动 Node.js Express 服务
 - ✅ 显示服务地址和 API 端点
 
 ---
@@ -378,16 +350,15 @@ MCP/
    - 右键选择「打开」（首次启动需要）
 
 3. **使用**
-   - 应用自动启动 Spring Boot 服务（首次需等待 3-5 秒）
-   - 在左侧输入任务，点击「执行任务」
+   - 应用自动启动 Node.js 后端服务(首次需等待 1-2 秒)
+   - 在左侧输入任务,点击「执行任务」
    - 右侧 BrowserView 实时展示浏览器操作
 
 ### 方式二：开发模式运行（推荐开发者）
 
 #### 环境要求
-- **Java 17+**
-- **Node.js 14+**
-- **Maven 3.6+**
+- **Node.js 18+**
+- **npm 8+**
 
 #### 快速启动（推荐）
 ```bash
@@ -397,10 +368,10 @@ MCP/
 
 #### 手动启动
 
-**1. 编译后端**
+**1. 安装后端依赖**
 ```bash
-cd react-mcp-demo
-mvn clean package -DskipTests
+cd node-mcp-backend
+npm install
 ```
 
 **2. 启动客户端**
@@ -410,14 +381,15 @@ npm install
 npm start
 ```
 
-> **注意**：开发模式下，Electron 会自动从 `react-mcp-demo/target/` 目录加载 JAR 文件并启动服务。
+> **注意**：开发模式下，Electron 会自动从 `node-mcp-backend/src/` 目录加载 Node.js 后端并启动服务。
 
 ### 方式三：分离启动（调试模式）
 
 #### 快速启动（推荐）
 ```bash
 # 终端 1: 启动后端
-./start-backend.sh
+cd node-mcp-backend
+npm start
 
 # 终端 2: 启动客户端
 ./start-frontend.sh
@@ -427,8 +399,8 @@ npm start
 
 **1. 手动启动后端**
 ```bash
-cd react-mcp-demo
-java -jar target/react-mcp-demo-0.0.1-SNAPSHOT.jar
+cd node-mcp-backend
+npm start
 ```
 
 **2. 启动客户端**
@@ -448,7 +420,8 @@ npm start
 #### 步骤 1：创建本地环境变量文件
 
 ```bash
-# 复制环境变量模板
+# 复制环境变量模板到 node-mcp-backend
+cd node-mcp-backend
 cp .env.example .env
 
 # 编辑 .env 文件，填写真实的 API Key
@@ -470,24 +443,18 @@ OPENAI_MODEL_NAME=gpt-4o-mini
 
 #### 步骤 2：启动项目
 
-项目会自动加载 `.env` 文件中的环境变量：
+项目会自动加载 `.env` 文件中的环境变量:
 
 ```bash
-./start-backend.sh --copy-to-frontend
-```
-
-或手动启动：
-```bash
-cd react-mcp-demo
-mvn clean package -DskipTests
-java -jar target/react-mcp-demo-0.0.1-SNAPSHOT.jar
+cd node-mcp-backend
+npm start
 ```
 
 ---
 
 ### 多 LLM 提供商支持
 
-项目支持多种 LLM 提供商，可通过配置文件切换：
+项目支持多种 LLM 提供商，可通过环境变量配置：
 
 #### 支持的提供商
 - **Qwen**（阿里云 DashScope）- 默认
@@ -497,39 +464,55 @@ java -jar target/react-mcp-demo-0.0.1-SNAPSHOT.jar
 #### 配置示例
 
 **使用 Qwen（默认）：**
-```yaml
-# react-mcp-demo/src/main/resources/application.yml
-langchain4j:
-  provider: qwen
-  qwen:
-    api-key: ${QWEN_API_KEY:sk-your-qwen-api-key-here}
-    model-name: qwen-turbo  # 或 qwen3-max
+```bash
+# .env 文件
+LLM_PROVIDER=qwen
+QWEN_API_KEY=sk-your-qwen-api-key-here
+QWEN_MODEL=qwen-turbo
 ```
 
-**切换到私有化 OpenAI：**
-```yaml
-langchain4j:
-  provider: openai  # ← 只需修改这一行
-  openai:
-    base-url: ${OPENAI_BASE_URL:http://your-gateway.com/v1}
-    api-key: ${OPENAI_API_KEY:sk-your-private-key}
-    model-name: ${OPENAI_MODEL_NAME:gpt-4o-mini}
+**切换到 OpenAI：**
+```bash
+# .env 文件
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-your-openai-key
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_MODEL=gpt-4o-mini
+```
+
+**使用私有化服务：**
+```bash
+# .env 文件
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-your-private-key
+OPENAI_BASE_URL=http://your-gateway.com/v1
+OPENAI_MODEL=your-model-name
 ```
 
 📚 **详细配置指南**：请查看 [LLM_PROVIDER_GUIDE.md](./LLM_PROVIDER_GUIDE.md)
 
 ---
 
-### Qwen API Key（旧版配置，不推荐）
+### 后端服务配置
 
-在 `react-mcp-demo/src/main/resources/application.yml` 中配置：
+配置文件位于 `node-mcp-backend/src/config/llmConfig.js`：
 
-```yaml
-langchain4j:
-  qwen:
-    api-key: sk-your-api-key-here
-    model-name: qwen3-max
-    max-messages: 10  # 消息窗口大小
+```javascript
+// LLM 配置
+const llmConfig = {
+  provider: process.env.LLM_PROVIDER || 'qwen',
+  qwen: {
+    apiKey: process.env.QWEN_API_KEY,
+    model: process.env.QWEN_MODEL || 'qwen-turbo',
+    baseURL: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+  },
+  openai: {
+    apiKey: process.env.OPENAI_API_KEY,
+    model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+    baseURL: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1'
+  },
+  maxMessages: 10  // 消息窗口大小
+};
 ```
 
 ### 窗口布局
@@ -557,7 +540,7 @@ const browserViewWidth = totalWidth - leftPanelWidth;  // 右侧 70%
 // main.js 远程控制服务配置
 const CONTROL_PORT = 9222;
 
-// Spring Boot 通过以下 API 控制浏览器
+// Node.js 后端通过以下 API 控制浏览器
 POST http://localhost:9222/browser/navigate?url=...
 POST http://localhost:9222/browser/click?selector=...
 POST http://localhost:9222/browser/fill?selector=...&text=...
@@ -567,7 +550,7 @@ GET  http://localhost:9222/browser/screenshot?fullPage=true
 
 ## 🔌 API 接口
 
-### Spring Boot 后端 API
+### Node.js 后端 API
 
 #### 1. 执行任务（流式输出）
 ```http
@@ -593,14 +576,7 @@ GET http://localhost:8080/actuator/health
 
 ### Electron IPC 接口
 
-#### 1. 获取 Spring Boot 状态
-```javascript
-// 渲染进程
-const status = await window.electronAPI.invoke('spring-boot-status');
-// 返回: {running: true, port: 8080}
-```
-
-#### 2. 获取服务信息
+#### 1. 获取服务信息
 ```javascript
 const info = await window.electronAPI.invoke('get-service-info');
 // 返回: {port: 8080, url: 'http://localhost:8080'}
@@ -641,10 +617,10 @@ GET http://localhost:9222/browser/screenshot?fullPage=true
 ## 🎨 架构特点
 
 ### 1. 前后端分离设计
-- **Spring Boot**：纯 API 服务，提供 ReAct 执行引擎
-- **Electron**：UI 展示 + BrowserView 管理 + 服务启动
-- **通信协议**：HTTP REST API + SSE 流式输出
-- **解耦优势**：后端可独立部署、前端可独立更新
+- **Node.js 后端**:纯 API 服务,提供 ReAct 执行引擎
+- **Electron**:UI 展示 + BrowserView 管理 + 服务启动
+- **通信协议**:HTTP REST API + SSE 流式输出
+- **解耦优势**:后端可独立部署、前端可独立更新
 
 ### 2. 智能上下文管理
 - **分层防护策略**：
@@ -661,10 +637,10 @@ GET http://localhost:9222/browser/screenshot?fullPage=true
 - **远程控制接口**：通过 HTTP API 与后端通信
 
 ### 4. 一体化打包
-- **ASAR 归档**：主应用代码压缩加载
-- **资源解包**：JAR 文件在 `app.asar.unpacked` 中可执行
-- **路径自适应**：自动判断开发/打包模式切换资源路径
-- **进程管理**：应用退出时自动清理 Spring Boot 进程
+- **ASAR 归档**:主应用代码压缩加载
+- **资源解包**:Node.js 后端在 `app.asar.unpacked` 中可执行
+- **路径自适应**:自动判断开发/打包模式切换资源路径
+- **进程管理**:应用退出时自动清理 Node.js 进程
 
 ### 5. 实时流式交互
 - **完整思考链路**：捕获 AI 每一步推理过程
@@ -690,37 +666,68 @@ npm start
 
 #### 1. 在后端定义工具
 
-```java
-// PlaywrightMcpTools.java
-@Tool("工具描述")
-public String yourNewTool(String param1, int param2) {
+```javascript
+// tools/yourNewTools.js
+class YourNewTools {
+  constructor() {
+    this.name = 'yourNewTool';
+    this.description = '工具描述';
+  }
+
+  async execute(param1, param2) {
     // 实现逻辑
-    return "结果";
+    return '结果';
+  }
+  
+  getSchema() {
+    return {
+      type: 'function',
+      function: {
+        name: this.name,
+        description: this.description,
+        parameters: {
+          type: 'object',
+          properties: {
+            param1: { type: 'string', description: '参数1' },
+            param2: { type: 'number', description: '参数2' }
+          },
+          required: ['param1']
+        }
+      }
+    };
+  }
 }
 ```
 
-#### 2. 重新编译
+#### 2. 注册工具
 
-```bash
-cd react-mcp-demo
-mvn clean package -DskipTests
+```javascript
+// tools/toolRegistry.js
+const YourNewTools = require('./yourNewTools');
+
+class ToolRegistry {
+  constructor() {
+    this.tools = new Map();
+    this.registerTool(new YourNewTools());
+  }
+  // ...
+}
 ```
 
 #### 3. 开发模式测试
 
 ```bash
-# 重启客户端即可（自动加载最新 JAR）
+# 重启客户端即可（自动加载最新代码）
 cd electron-react-mcp
-pkill -f "electron|java.*react-mcp"
+pkill -f "electron|node.*server.js"
 npm start
 ```
 
 #### 4. 打包发布
 
 ```bash
-# 复制 JAR 到打包目录
-cp react-mcp-demo/target/react-mcp-demo-0.0.1-SNAPSHOT.jar \
-   electron-react-mcp/spring-boot-server/
+# 复制后端代码到打包目录
+cp -r node-mcp-backend electron-react-mcp/node-backend/
 
 # 生成安装包
 cd electron-react-mcp
@@ -729,31 +736,26 @@ npm run dist
 
 ### 调整 AI 提示词
 
-```java
-// McpAssistant.java 或 LangchainConfig.java
-String systemMessage = """
-你是一个智能浏览器自动化助手...
-
-### 可用工具
-1. navigate(url) - 打开网页
-2. click(selector) - 点击元素
-...
-""";
+```javascript
+// agent/reactAgent.js
+buildSystemPrompt() {
+  return `你是一个基于 ReAct 框架的智能 Agent...
+  
+  ## 可用工具
+  1. navigate(url) - 打开网页
+  2. click(selector) - 点击元素
+  ...`;
+}
 ```
 
-### 修改上下文压缩配置
+### 修改上下文管理配置
 
-```java
-// PlaywrightMcpTools.java
-private static final int MAX_TEXT_LENGTH = 5000;  // 调整文本压缩阈值
-private static final int MAX_HTML_LENGTH = 8000;  // 调整 HTML 压缩阈值
-```
-
-```yaml
-# application.yml
-langchain4j:
-  qwen:
-    max-messages: 10  # 调整消息窗口大小
+```javascript
+// config/llmConfig.js
+const llmConfig = {
+  maxMessages: 15,  // 调整消息窗口大小
+  // ...
+};
 ```
 
 ### 调试技巧
@@ -762,7 +764,8 @@ langchain4j:
 
 ```bash
 # 客户端启动后，日志会实时输出到终端
-[SPRING BOOT] 2025-12-12T14:14:47.100+08:00  INFO ...
+[NODE.JS BACKEND] 服务器已启动
+[NODE.JS BACKEND] 端口: 8080
 ```
 
 #### 2. 查看前端控制台
@@ -781,6 +784,9 @@ curl "http://localhost:8080/react/solve-stream?task=打开百度"
 
 # 测试浏览器控制
 curl "http://localhost:9222/browser/navigate?url=https://www.baidu.com"
+
+# 检查健康状态
+curl "http://localhost:8080/health"
 ```
 
 ### 常见问题
@@ -793,27 +799,29 @@ lsof -i :8080
 lsof -i :9222
 
 # 清理进程
-pkill -f "java.*react-mcp"
+pkill -f "node.*server.js"
+pkill -f "electron"
 ```
 
-#### 2. JAR 文件未更新
+#### 2. 后端代码未更新
 
 ```bash
-# 开发模式：确保编译成功
-cd react-mcp-demo
-mvn clean package -DskipTests
+# 开发模式:确保依赖安装成功
+cd node-mcp-backend
+npm install
 
-# 打包模式：确保复制到正确位置
-cp target/*.jar ../electron-react-mcp/spring-boot-server/
+# 打包模式:确保复制到正确位置
+cp -r node-mcp-backend ../electron-react-mcp/node-backend/
 ```
 
 #### 3. 打包后无法启动
 
 ```bash
-# 检查 JAR 是否在 app.asar.unpacked 中
-ls -la "dist/mac/ReAct MCP 客户端.app/Contents/Resources/app.asar.unpacked/spring-boot-server/"
+# 检查 Node.js 后端是否在 app.asar.unpacked 中
+ls -la "dist/mac/ReAct MCP 客户端.app/Contents/Resources/app.asar.unpacked/node-backend/"
 
 # 查看打包日志
+cd electron-react-mcp
 npm run dist 2>&1 | tee build.log
 ```
 
@@ -825,12 +833,14 @@ npm run dist 2>&1 | tee build.log
 
 ## 🙏 致谢
 
-- [langchain4j](https://github.com/langchain4j/langchain4j) - Java AI 编排框架
+- [OpenAI](https://openai.com/) - AI 模型 API
 - [Playwright](https://playwright.dev/) - 浏览器自动化引擎
 - [Electron](https://www.electronjs.org/) - 跨平台桌面应用框架
 - [Qwen](https://tongyi.aliyun.com/) - 阿里云通义千问大模型
+- [Express](https://expressjs.com/) - Node.js Web 框架
 
 ---
 
-**版本**: 1.0.0  
-**更新时间**: 2025-12-12  
+**版本**: 2.0.0 (Node.js Backend)  
+**更新时间**: 2025-12-16  
+**技术架构**: Electron + Node.js + ReAct + Playwright

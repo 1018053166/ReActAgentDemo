@@ -10,7 +10,12 @@
     "dev:electron": "electron .",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
-    "build-electron": "node scripts/build-electron.js",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win",
+    "dist:all": "electron-builder --mac --win",
+    "build:all": "npm run build:backend && npm run build:electron",
+    "build:backend": "cd ../node-mcp-backend && npm install",
+    "build:electron": "node scripts/build-electron.js",
     "postinstall": "electron-builder install-app-deps"
   },
   "build": {
@@ -25,17 +30,17 @@
       "node_modules/**/*"
     ],
     "asarUnpack": [
-      "spring-boot-server/**/*"
+      "node-backend/**/*"
     ],
     "extraResources": [
       {
-        "from": "react-ui/build",
+        "from": "react-ui/public",
         "to": "react-ui/build",
         "filter": ["**/*"]
       },
       {
-        "from": "spring-boot-server",
-        "to": "app.asar.unpacked/spring-boot-server",
+        "from": "node-backend",
+        "to": "app.asar.unpacked/node-backend",
         "filter": ["**/*"]
       }
     ],

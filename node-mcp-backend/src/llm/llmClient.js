@@ -117,12 +117,18 @@ export class LLMClient {
 
     const fixed = [];
     let lastRole = null;
+    const MAX_TOOL_CONTENT_LENGTH = 2000; // 限制 tool 响应最大长度
 
     for (const msg of messages) {
       // 跳过 system 消息的检查
       if (msg.role === 'system') {
         fixed.push(msg);
         continue;
+      }
+
+      // 限制 tool 响应内容长度
+      if (msg.role === 'tool' && msg.content && msg.content.length > MAX_TOOL_CONTENT_LENGTH) {
+        msg.content = msg.content.substring(0, MAX_TOOL_CONTENT_LENGTH) + '... [内容过长，已截断]';
       }
 
       // 如果连续出现相同角色，合并消息

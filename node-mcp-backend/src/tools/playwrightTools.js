@@ -12,6 +12,7 @@ export class PlaywrightTools {
 
   static getToolDefinitions() {
     return [
+      // ========== 基础导航 ==========
       {
         type: 'function',
         function: {
@@ -29,8 +30,86 @@ export class PlaywrightTools {
       {
         type: 'function',
         function: {
+          name: 'goBack',
+          description: '浏览器后退到上一页',
+          parameters: {
+            type: 'object',
+            properties: {}
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'goForward',
+          description: '浏览器前进到下一页',
+          parameters: {
+            type: 'object',
+            properties: {}
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'reload',
+          description: '刷新当前页面',
+          parameters: {
+            type: 'object',
+            properties: {}
+          }
+        }
+      },
+      
+      // ========== 元素交互 ==========
+      {
+        type: 'function',
+        function: {
           name: 'click',
           description: '点击页面元素',
+          parameters: {
+            type: 'object',
+            properties: {
+              selector: { type: 'string', description: '元素选择器（CSS Selector）' }
+            },
+            required: ['selector']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'fill',
+          description: '填充表单字段（支持敏感词过滤）',
+          parameters: {
+            type: 'object',
+            properties: {
+              selector: { type: 'string', description: '表单元素选择器' },
+              value: { type: 'string', description: '要填充的内容' }
+            },
+            required: ['selector', 'value']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'press',
+          description: '按下键盘按键',
+          parameters: {
+            type: 'object',
+            properties: {
+              key: { type: 'string', description: '按键名称（如 Enter, Escape, Tab）' }
+            },
+            required: ['key']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'hover',
+          description: '鼠标悬停在元素上',
           parameters: {
             type: 'object',
             properties: {
@@ -43,13 +122,13 @@ export class PlaywrightTools {
       {
         type: 'function',
         function: {
-          name: 'fill',
-          description: '填充表单字段',
+          name: 'select',
+          description: '下拉框选择选项',
           parameters: {
             type: 'object',
             properties: {
-              selector: { type: 'string', description: '元素选择器' },
-              value: { type: 'string', description: '填充的值' }
+              selector: { type: 'string', description: '下拉框选择器' },
+              value: { type: 'string', description: '要选择的值' }
             },
             required: ['selector', 'value']
           }
@@ -58,8 +137,25 @@ export class PlaywrightTools {
       {
         type: 'function',
         function: {
+          name: 'waitForSelector',
+          description: '等待元素出现（最长30秒）',
+          parameters: {
+            type: 'object',
+            properties: {
+              selector: { type: 'string', description: '元素选择器' },
+              timeout: { type: 'number', description: '超时时间（毫秒，默认30000）' }
+            },
+            required: ['selector']
+          }
+        }
+      },
+      
+      // ========== 信息获取 ==========
+      {
+        type: 'function',
+        function: {
           name: 'screenshot',
-          description: '截取当前页面截图',
+          description: '抓取当前页面截图',
           parameters: {
             type: 'object',
             properties: {
@@ -72,7 +168,29 @@ export class PlaywrightTools {
         type: 'function',
         function: {
           name: 'getPageContent',
-          description: '获取当前页面的文本内容',
+          description: '获取页面可见文本内容（智能压缩）',
+          parameters: {
+            type: 'object',
+            properties: {}
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'getPageUrl',
+          description: '获取当前页面的URL',
+          parameters: {
+            type: 'object',
+            properties: {}
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'getPageTitle',
+          description: '获取当前页面的标题',
           parameters: {
             type: 'object',
             properties: {}
@@ -101,10 +219,28 @@ export class PlaywrightTools {
         return await this.click(args.selector);
       case 'fill':
         return await this.fill(args.selector, args.value);
+      case 'press':
+        return await this.press(args.key);
+      case 'hover':
+        return await this.hover(args.selector);
+      case 'select':
+        return await this.select(args.selector, args.value);
+      case 'goBack':
+        return await this.goBack();
+      case 'goForward':
+        return await this.goForward();
+      case 'reload':
+        return await this.reload();
+      case 'waitForSelector':
+        return await this.waitForSelector(args.selector, args.timeout);
       case 'screenshot':
         return await this.screenshot(args.fileName);
       case 'getPageContent':
         return await this.getPageContent();
+      case 'getPageUrl':
+        return await this.getPageUrl();
+      case 'getPageTitle':
+        return await this.getPageTitle();
       case 'getConsoleLogs':
         return await this.getConsoleLogs();
       default:
@@ -117,9 +253,12 @@ export class PlaywrightTools {
    */
   async navigate(url) {
     try {
-      const response = await axios.post(`${this.remoteUrl}/navigate`, { url });
+      console.log(`[Playwright] 尝试导航到: ${url}`);
+      const response = await axios.get(`${this.remoteUrl}/browser/navigate?url=${encodeURIComponent(url)}`);
+      console.log(`[Playwright] 导航成功: ${url}`);
       return `成功导航到: ${url}`;
     } catch (error) {
+      console.error(`[Playwright] 导航失败:`, error.message);
       return this.handleRemoteCall('navigate', { url });
     }
   }
@@ -129,9 +268,12 @@ export class PlaywrightTools {
    */
   async click(selector) {
     try {
-      const response = await axios.post(`${this.remoteUrl}/click`, { selector });
+      console.log(`[Playwright] 尝试点击元素: ${selector}`);
+      const response = await axios.get(`${this.remoteUrl}/browser/click?selector=${encodeURIComponent(selector)}`);
+      console.log(`[Playwright] 点击成功: ${selector}`);
       return `成功点击元素: ${selector}`;
     } catch (error) {
+      console.error(`[Playwright] 点击失败:`, error.message);
       return this.handleRemoteCall('click', { selector });
     }
   }
@@ -146,9 +288,12 @@ export class PlaywrightTools {
         throw new Error('输入内容包含敏感词');
       }
       
-      const response = await axios.post(`${this.remoteUrl}/fill`, { selector, value });
+      console.log(`[Playwright] 尝试填充字段: ${selector} = ${value}`);
+      const response = await axios.get(`${this.remoteUrl}/browser/fill?selector=${encodeURIComponent(selector)}&text=${encodeURIComponent(value)}`);
+      console.log(`[Playwright] 填充成功: ${selector}`);
       return `成功填充字段: ${selector}`;
     } catch (error) {
+      console.error(`[Playwright] 填充失败:`, error.message);
       return this.handleRemoteCall('fill', { selector, value });
     }
   }
@@ -159,7 +304,7 @@ export class PlaywrightTools {
   async screenshot(fileName) {
     try {
       const name = fileName || `screenshot-${Date.now()}.png`;
-      const response = await axios.post(`${this.remoteUrl}/screenshot`, { fileName: name });
+      const response = await axios.get(`${this.remoteUrl}/browser/screenshot?fileName=${encodeURIComponent(name)}`);
       return `截图已保存: ${name}`;
     } catch (error) {
       return this.handleRemoteCall('screenshot', { fileName });
@@ -171,8 +316,8 @@ export class PlaywrightTools {
    */
   async getPageContent() {
     try {
-      const response = await axios.get(`${this.remoteUrl}/content`);
-      const content = response.data.content || '';
+      const response = await axios.get(`${this.remoteUrl}/browser/getVisibleText`);
+      const content = response.data.result || '';
       
       // 智能压缩超长文本
       return this.compressText(content);
@@ -182,11 +327,142 @@ export class PlaywrightTools {
   }
 
   /**
+   * 按下键盘按键
+   */
+  async press(key) {
+    try {
+      console.log(`[Playwright] 尝试按下按键: ${key}`);
+      const response = await axios.get(`${this.remoteUrl}/browser/press?key=${encodeURIComponent(key)}`);
+      console.log(`[Playwright] 按键成功: ${key}`);
+      return `成功按下按键: ${key}`;
+    } catch (error) {
+      console.error(`[Playwright] 按键失败:`, error.message);
+      return this.handleRemoteCall('press', { key });
+    }
+  }
+
+  /**
+   * 鼠标悬停
+   */
+  async hover(selector) {
+    try {
+      console.log(`[Playwright] 尝试悬停元素: ${selector}`);
+      const response = await axios.get(`${this.remoteUrl}/browser/hover?selector=${encodeURIComponent(selector)}`);
+      console.log(`[Playwright] 悬停成功: ${selector}`);
+      return `成功悬停元素: ${selector}`;
+    } catch (error) {
+      console.error(`[Playwright] 悬停失败:`, error.message);
+      return this.handleRemoteCall('hover', { selector });
+    }
+  }
+
+  /**
+   * 下拉框选择
+   */
+  async select(selector, value) {
+    try {
+      console.log(`[Playwright] 尝试选择选项: ${selector} = ${value}`);
+      const response = await axios.get(`${this.remoteUrl}/browser/select?selector=${encodeURIComponent(selector)}&value=${encodeURIComponent(value)}`);
+      console.log(`[Playwright] 选择成功: ${selector}`);
+      return `成功选择选项: ${selector} = ${value}`;
+    } catch (error) {
+      console.error(`[Playwright] 选择失败:`, error.message);
+      return this.handleRemoteCall('select', { selector, value });
+    }
+  }
+
+  /**
+   * 浏览器后退
+   */
+  async goBack() {
+    try {
+      console.log(`[Playwright] 尝试后退`);
+      const response = await axios.get(`${this.remoteUrl}/browser/goBack`);
+      console.log(`[Playwright] 后退成功`);
+      return `成功后退到上一页`;
+    } catch (error) {
+      console.error(`[Playwright] 后退失败:`, error.message);
+      return this.handleRemoteCall('goBack', {});
+    }
+  }
+
+  /**
+   * 浏览器前进
+   */
+  async goForward() {
+    try {
+      console.log(`[Playwright] 尝试前进`);
+      const response = await axios.get(`${this.remoteUrl}/browser/goForward`);
+      console.log(`[Playwright] 前进成功`);
+      return `成功前进到下一页`;
+    } catch (error) {
+      console.error(`[Playwright] 前进失败:`, error.message);
+      return this.handleRemoteCall('goForward', {});
+    }
+  }
+
+  /**
+   * 刷新页面
+   */
+  async reload() {
+    try {
+      console.log(`[Playwright] 尝试刷新页面`);
+      const response = await axios.get(`${this.remoteUrl}/browser/reload`);
+      console.log(`[Playwright] 刷新成功`);
+      return `页面刷新成功`;
+    } catch (error) {
+      console.error(`[Playwright] 刷新失败:`, error.message);
+      return this.handleRemoteCall('reload', {});
+    }
+  }
+
+  /**
+   * 等待元素出现
+   */
+  async waitForSelector(selector, timeout = 30000) {
+    try {
+      console.log(`[Playwright] 等待元素: ${selector}`);
+      const response = await axios.get(`${this.remoteUrl}/browser/waitFor?selector=${encodeURIComponent(selector)}&timeout=${timeout}`);
+      console.log(`[Playwright] 元素已出现: ${selector}`);
+      return `元素已出现: ${selector}`;
+    } catch (error) {
+      console.error(`[Playwright] 等待超时:`, error.message);
+      return this.handleRemoteCall('waitForSelector', { selector, timeout });
+    }
+  }
+
+  /**
+   * 获取页面URL
+   */
+  async getPageUrl() {
+    try {
+      const response = await axios.get(`${this.remoteUrl}/browser/getPageInfo`);
+      const url = response.data.result?.url || '';
+      return `当前页面URL: ${url}`;
+    } catch (error) {
+      return this.handleRemoteCall('getPageUrl', {});
+    }
+  }
+
+  /**
+   * 获取页面标题
+   */
+  async getPageTitle() {
+    try {
+      const response = await axios.get(`${this.remoteUrl}/browser/getPageInfo`);
+      const title = response.data.result?.title || '';
+      return `当前页面标题: ${title}`;
+    } catch (error) {
+      return this.handleRemoteCall('getPageTitle', {});
+    }
+  }
+
+  /**
    * 获取控制台日志
    */
   async getConsoleLogs() {
     try {
-      const response = await axios.get(`${this.remoteUrl}/console-logs`);
+      const response = await axios.get(`${this.remoteUrl}/browser/console-logs`);
       const logs = response.data.logs || [];
       
       if (logs.length === 0) {

@@ -9,12 +9,14 @@ const url = require('url');
 // 在 app.ready 之前禁用硬件加速以减少 EGL 错误
 app.disableHardwareAcceleration();
 
-// Spring Boot 服务进程
-let springBootProcess = null;
-// Spring Boot 服务端口
-const SPRING_BOOT_PORT = 8080;
+// 后端服务进程（支持 Spring Boot 或 Node.js）
+let backendProcess = null;
+// 后端服务端口
+const BACKEND_PORT = 8080;
 // 服务启动超时时间（毫秒）
 const SERVICE_START_TIMEOUT = 30000;
+// 后端类型：'springboot' 或 'nodejs'
+const BACKEND_TYPE = process.env.BACKEND_TYPE || 'nodejs'; // 默认使用 Node.js
 // BrowserView 实例
 let browserView = null;
 // 远程控制 HTTP 服务器
@@ -179,6 +181,43 @@ function startControlServer() {
       return;
     }
     
+    // 添加调试路由：获取所有输入框信息
+    if (pathname === '/browser/debug/inputs' && req.method === 'GET') {
+      if (browserView) {
+        try {
+          browserView.webContents.executeJavaScript(`
+            (function() {
+              const inputs = Array.from(document.querySelectorAll('input'));
+              return inputs.map(input => ({
+                tagName: input.tagName,
+                type: input.type,
+                name: input.name,
+                id: input.id,
+                className: input.className,
+                placeholder: input.placeholder,
+                ariaLabel: input.getAttribute('aria-label'),
+                visible: input.offsetParent !== null,
+                disabled: input.disabled
+              }));
+            })()
+          `).then(result => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, inputs: result }));
+          }).catch(error => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: error.message }));
+          });
+        } catch (error) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, message: error.message }));
+        }
+      } else {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
+      }
+      return;
+    }
+    
     // 添加点击路由处理
     if (pathname === '/browser/click' && req.method === 'GET') {
       const selector = parsedUrl.query.selector;
@@ -193,15 +232,18 @@ function startControlServer() {
         try {
           // 使用 evaluate 在页面中执行点击操作
           browserView.webContents.executeJavaScript(`
-            new Promise((resolve, reject) => {
-              const element = document.querySelector('${selector}');
-              if (element) {
-                element.click();
-                resolve({ success: true, message: 'Click executed' });
-              } else {
-                reject(new Error('Element not found: ${selector}'));
-              }
-            });
+            (function() {
+              const selectorParam = ${JSON.stringify(selector)};
+              return new Promise((resolve, reject) => {
+                const element = document.querySelector(selectorParam);
+                if (element) {
+                  element.click();
+                  resolve({ success: true, message: 'Click executed' });
+                } else {
+                  reject(new Error('Element not found: ' + selectorParam));
+                }
+              });
+            })()
           `).then(result => {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ 
@@ -239,196 +281,201 @@ function startControlServer() {
         try {
           // 使用更智能的输入方法，添加等待和错误处理
           browserView.webContents.executeJavaScript(`
-            new Promise((resolve, reject) => {
-              try {
-                // 首先等待页面基本加载完成
-                if (document.readyState !== 'complete') {
-                  window.addEventListener('load', () => {
+            (function() {
+              const selectorParam = ${JSON.stringify(selector)};
+              const textParam = ${JSON.stringify(text)};
+              
+              return new Promise((resolve, reject) => {
+                try {
+                  // 首先等待页面基本加载完成
+                  if (document.readyState !== 'complete') {
+                    window.addEventListener('load', () => {
+                      performFill();
+                    });
+                  } else {
                     performFill();
-                  });
-                } else {
-                  performFill();
-                }
-                
-                function performFill() {
-                  // 多种策略尝试找到并填充输入框
-                  const strategies = [
-                    // 策略1: 直接使用传入的选择器
-                    (sel) => {
-                      try {
-                        const element = document.querySelector(sel);
-                        if (element) {
-                          console.log('Direct selector strategy success');
-                          return element;
-                        }
-                      } catch (e) {
-                        console.log('Direct selector failed:', e.message);
-                      }
-                      return null;
-                    },
-                    
-                    // 策略2: GitHub 搜索框特殊处理
-                    () => {
-                      const selectors = [
-                        'input[aria-label="Search or jump to..."]',
-                        'input[name="q"]',
-                        'input[type="search"]',
-                        'input[placeholder*="Search"]',
-                        'input[placeholder*="搜索"]',
-                        '#global-search',
-                        'input[aria-label*="search"]',
-                        'input[aria-label*="Search"]'
-                      ];
-                      
-                      for (const sel of selectors) {
+                  }
+                  
+                  function performFill() {
+                    // 多种策略尝试找到并填充输入框
+                    const strategies = [
+                      // 策略1: 直接使用传入的选择器
+                      (sel) => {
                         try {
                           const element = document.querySelector(sel);
                           if (element) {
-                            console.log('GitHub strategy success:', sel);
+                            console.log('Direct selector strategy success');
                             return element;
                           }
                         } catch (e) {
-                          console.log('GitHub selector failed:', sel, e.message);
+                          console.log('Direct selector failed:', e.message);
                         }
-                      }
-                      return null;
-                    },
-                    
-                    // 策略3: 通用的搜索输入框
-                    () => {
-                      const inputs = Array.from(document.querySelectorAll('input'));
-                      for (const input of inputs) {
-                        try {
-                          const placeholder = input.placeholder?.toLowerCase() || '';
-                          const aria = input.getAttribute('aria-label')?.toLowerCase() || '';
-                          const name = input.name?.toLowerCase() || '';
-                          const id = input.id?.toLowerCase() || '';
-                          
-                          const isSearchBox = placeholder.includes('search') || 
-                                             placeholder.includes('搜索') ||
-                                             aria.includes('search') ||
-                                             aria.includes('搜索') ||
-                                             name.includes('search') ||
-                                             name.includes('q') ||
-                                             id.includes('search') ||
-                                             input.type === 'search';
-                          
-                          if (isSearchBox && !input.disabled && input.offsetParent !== null) {
-                            console.log('Generic search strategy success');
-                            return input;
-                          }
-                        } catch (e) {
-                          console.log('Generic input check failed:', e.message);
-                        }
-                      }
-                      return null;
-                    }
-                  ];
-                  
-                  let element = null;
-                  let strategy = 0;
-                  
-                  // 尝试不同的策略
-                  while (strategy < strategies.length && !element) {
-                    try {
-                      const selectorParam = selector;
-                      // 只有策略1需要传入选择器参数，其他策略不需要
-                      if (strategy === 0) {
-                        element = strategies[strategy](selectorParam);
-                      } else {
-                        element = strategies[strategy]();
-                      }
+                        return null;
+                      },
                       
-                      if (element) {
-                        console.log('Found element using strategy', strategy + 1);
-                        break;
-                      }
-                    } catch (e) {
-                      console.log('Strategy', strategy + 1, 'failed:', e.message);
-                      strategy++;
-                    }
-                  }
-                  
-                  if (!element) {
-                    reject(new Error('Input element not found using any strategy'));
-                    return;
-                  }
-                  
-                  // 等待元素可见并启用
-                  function waitForElement() {
-                    return new Promise((resolve, reject) => {
-                      const checkElement = () => {
-                        const style = window.getComputedStyle(element);
-                        const rect = element.getBoundingClientRect();
+                      // 策略2: GitHub 搜索框特殊处理
+                      () => {
+                        const selectors = [
+                          'input[aria-label="Search or jump to..."]',
+                          'input[name="q"]',
+                          'input[type="search"]',
+                          'input[placeholder*="Search"]',
+                          'input[placeholder*="搜索"]',
+                          '#global-search',
+                          'input[aria-label*="search"]',
+                          'input[aria-label*="Search"]'
+                        ];
                         
-                        if (style.display !== 'none' && 
-                            style.visibility !== 'hidden' && 
-                            style.opacity !== '0' &&
-                            rect.width > 0 && 
-                            rect.height > 0 &&
-                            !element.disabled) {
-                          resolve();
-                        } else {
-                          setTimeout(checkElement, 100);
+                        for (const sel of selectors) {
+                          try {
+                            const element = document.querySelector(sel);
+                            if (element) {
+                              console.log('GitHub strategy success:', sel);
+                              return element;
+                            }
+                          } catch (e) {
+                            console.log('GitHub selector failed:', sel, e.message);
+                          }
                         }
-                      };
+                        return null;
+                      },
                       
-                      checkElement();
+                      // 策略3: 通用的搜索输入框
+                      () => {
+                        const inputs = Array.from(document.querySelectorAll('input'));
+                        for (const input of inputs) {
+                          try {
+                            const placeholder = input.placeholder?.toLowerCase() || '';
+                            const aria = input.getAttribute('aria-label')?.toLowerCase() || '';
+                            const name = input.name?.toLowerCase() || '';
+                            const id = input.id?.toLowerCase() || '';
+                            
+                            const isSearchBox = placeholder.includes('search') || 
+                                               placeholder.includes('搜索') ||
+                                               aria.includes('search') ||
+                                               aria.includes('搜索') ||
+                                               name.includes('search') ||
+                                               name.includes('q') ||
+                                               id.includes('search') ||
+                                               input.type === 'search';
+                            
+                            if (isSearchBox && !input.disabled && input.offsetParent !== null) {
+                              console.log('Generic search strategy success');
+                              return input;
+                            }
+                          } catch (e) {
+                            console.log('Generic input check failed:', e.message);
+                          }
+                        }
+                        return null;
+                      }
+                    ];
+                    
+                    let element = null;
+                    let strategy = 0;
+                    
+                    // 尝试不同的策略
+                    while (strategy < strategies.length && !element) {
+                      try {
+                        // 只有策略1需要传入选择器参数，其他策略不需要
+                        if (strategy === 0) {
+                          element = strategies[strategy](selectorParam);
+                        } else {
+                          element = strategies[strategy]();
+                        }
+                        
+                        if (element) {
+                          console.log('Found element using strategy', strategy + 1);
+                          break;
+                        }
+                        strategy++;
+                      } catch (e) {
+                        console.log('Strategy', strategy + 1, 'failed:', e.message);
+                        strategy++;
+                      }
+                    }
+                    
+                    if (!element) {
+                      reject(new Error('Input element not found using any strategy'));
+                      return;
+                    }
+                    
+                    // 等待元素可见并启用
+                    function waitForElement() {
+                      return new Promise((resolve, reject) => {
+                        const checkElement = () => {
+                          const style = window.getComputedStyle(element);
+                          const rect = element.getBoundingClientRect();
+                          
+                          if (style.display !== 'none' && 
+                              style.visibility !== 'hidden' && 
+                              style.opacity !== '0' &&
+                              rect.width > 0 && 
+                              rect.height > 0 &&
+                              !element.disabled) {
+                            resolve();
+                          } else {
+                            setTimeout(checkElement, 100);
+                          }
+                        };
+                        
+                        checkElement();
+                        
+                        // 超时保护
+                        setTimeout(() => {
+                          reject(new Error('Element not ready within timeout'));
+                        }, 10000);
+                      });
+                    }
+                    
+                    // 执行填充操作
+                    waitForElement().then(() => {
+                      // 模拟真实用户输入
+                      element.focus();
+                      element.select();
                       
-                      // 超时保护
-                      setTimeout(() => {
-                        reject(new Error('Element not ready within timeout'));
-                      }, 10000);
+                      // 清除现有内容
+                      element.value = '';
+                      
+                      // 逐字符输入，模拟真实打字
+                      let index = 0;
+                      const inputInterval = setInterval(() => {
+                        if (index < textParam.length) {
+                          element.value += textParam[index];
+                          
+                          // 触发输入事件
+                          element.dispatchEvent(new Event('input', { bubbles: true }));
+                          element.dispatchEvent(new KeyboardEvent('keydown', { key: textParam[index] }));
+                          element.dispatchEvent(new KeyboardEvent('keyup', { key: textParam[index] }));
+                          
+                          index++;
+                        } else {
+                          clearInterval(inputInterval);
+                          
+                          // 触发最终事件
+                          element.dispatchEvent(new Event('input', { bubbles: true }));
+                          element.dispatchEvent(new Event('change', { bubbles: true }));
+                          element.dispatchEvent(new Event('blur', { bubbles: true }));
+                          
+                          resolve({ 
+                            success: true, 
+                            message: 'Fill executed successfully',
+                            element: element.tagName + (element.id ? '#' + element.id : '') + (element.className ? '.' + element.className.split(' ')[0] : '')
+                          });
+                        }
+                      }, 10); // 每10ms输入一个字符
+                      
+                    }).catch(error => {
+                      reject(new Error('Element not ready: ' + error.message));
                     });
                   }
-                  
-                  // 执行填充操作
-                  waitForElement().then(() => {
-                    // 模拟真实用户输入
-                    element.focus();
-                    element.select();
-                    
-                    // 清除现有内容
-                    element.value = '';
-                    
-                    // 逐字符输入，模拟真实打字
-                    let index = 0;
-                    const inputText = text;
-                    const inputInterval = setInterval(() => {
-                      if (index < inputText.length) {
-                        element.value += inputText[index];
-                        
-                        // 触发输入事件
-                        element.dispatchEvent(new Event('input', { bubbles: true }));
-                        element.dispatchEvent(new KeyboardEvent('keydown', { key: inputText[index] }));
-                        element.dispatchEvent(new KeyboardEvent('keyup', { key: inputText[index] }));
-                        
-                        index++;
-                      } else {
-                        clearInterval(inputInterval);
-                        
-                        // 触发最终事件
-                        element.dispatchEvent(new Event('input', { bubbles: true }));
-                        element.dispatchEvent(new Event('change', { bubbles: true }));
-                        element.dispatchEvent(new Event('blur', { bubbles: true }));
-                        
-                        resolve({ 
-                          success: true, 
-                          message: 'Fill executed successfully',
-                          element: element.tagName + (element.id ? '#' + element.id : '') + (element.className ? '.' + element.className.split(' ')[0] : '')
-                        });
-                      }
-                    }, 10); // 每10ms输入一个字符
-                    
-                  }).catch(error => {
-                    reject(new Error('Element not ready: ' + error.message));
-                  });
+                } catch (error) {
+                  reject(error);
                 }
-              } catch (error) {
-                reject(error);
-              }
-            });
+              });
+            })()
           `).then(result => {
+            console.log('[MAIN] Fill 执行成功:', result);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ 
               success: true, 
@@ -436,6 +483,8 @@ function startControlServer() {
               result: result
             }));
           }).catch(error => {
+            console.error('[MAIN] Fill 执行失败:', error.message);
+            console.error('[MAIN] Fill 错误堆栈:', error.stack);
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ success: false, message: error.message }));
           });
@@ -470,6 +519,76 @@ function startControlServer() {
               message: 'Page info retrieved successfully',
               result: result
             }));
+          }).catch(error => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: error.message }));
+          });
+        } catch (error) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, message: error.message }));
+        }
+      } else {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
+      }
+      return;
+    }
+    
+    // 按键路由
+    if (pathname === '/browser/press' && req.method === 'GET') {
+      const key = parsedUrl.query.key;
+      if (!key) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, message: 'Missing key parameter' }));
+        return;
+      }
+      
+      if (browserView) {
+        try {
+          browserView.webContents.sendInputEvent({ type: 'keyDown', keyCode: key });
+          browserView.webContents.sendInputEvent({ type: 'keyUp', keyCode: key });
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true, message: `Pressed key: ${key}` }));
+        } catch (error) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, message: error.message }));
+        }
+      } else {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
+      }
+      return;
+    }
+    
+    // 获取页面URL
+    if (pathname === '/browser/getPageUrl' && req.method === 'GET') {
+      if (browserView) {
+        try {
+          browserView.webContents.executeJavaScript('window.location.href').then(url => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, url }));
+          }).catch(error => {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: false, message: error.message }));
+          });
+        } catch (error) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, message: error.message }));
+        }
+      } else {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, message: 'BrowserView not initialized' }));
+      }
+      return;
+    }
+    
+    // 获取页面标题
+    if (pathname === '/browser/getPageTitle' && req.method === 'GET') {
+      if (browserView) {
+        try {
+          browserView.webContents.executeJavaScript('document.title').then(title => {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ success: true, title }));
           }).catch(error => {
             res.writeHead(500, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ success: false, message: error.message }));
@@ -1015,66 +1134,127 @@ function isPortAvailable(port) {
   });
 }
 
-// 启动 Spring Boot 服务
-async function startSpringBootService() {
+// 启动后端服务（支持 Spring Boot 和 Node.js）
+async function startBackendService() {
   return new Promise(async (resolve, reject) => {
-    console.log('[MAIN] 检查 Spring Boot 服务端口...');
+    console.log(`[MAIN] 检查后端服务端口... (类型: ${BACKEND_TYPE})`);
     
     // 检查端口是否已被占用
-    const portAvailable = await isPortAvailable(SPRING_BOOT_PORT);
+    const portAvailable = await isPortAvailable(BACKEND_PORT);
     if (!portAvailable) {
-      console.log('[MAIN] Spring Boot 服务已在运行');
-      resolve({ port: SPRING_BOOT_PORT, started: false });
+      console.log('[MAIN] 后端服务已在运行');
+      resolve({ port: BACKEND_PORT, started: false });
       return;
     }
 
-    console.log('[MAIN] 启动 Spring Boot 服务...');
-    
-    // 确定 JAR 文件路径
-    const jarPath = isDev 
-      ? path.join(__dirname, '../react-mcp-demo/target/react-mcp-demo-0.0.1-SNAPSHOT.jar')
-      : path.join(process.resourcesPath, 'app.asar.unpacked/spring-boot-server/react-mcp-demo-0.0.1-SNAPSHOT.jar');
-    console.log('[MAIN] JAR 文件路径:', jarPath);
-    console.log('[MAIN] JAR 文件是否存在:', require('fs').existsSync(jarPath));
-
-    // 启动 Spring Boot 应用
-    springBootProcess = spawn('java', ['-jar', jarPath], {
-      cwd: path.dirname(jarPath),
-    });
-
-    springBootProcess.stdout.on('data', (data) => {
-      const output = data.toString();
-      console.log(`[SPRING BOOT] ${output}`);
-      
-      // 检查服务是否启动完成
-      if (output.includes('Started ReactMcpApplication')) {
-        console.log('[MAIN] Spring Boot 服务启动成功');
-        resolve({ port: SPRING_BOOT_PORT, started: true });
-      }
-    });
-
-    springBootProcess.stderr.on('data', (data) => {
-      console.error(`[SPRING BOOT ERROR] ${data}`);
-    });
-
-    springBootProcess.on('error', (error) => {
-      console.error('[MAIN] 启动 Spring Boot 服务失败:', error);
-      reject(error);
-    });
+    if (BACKEND_TYPE === 'nodejs') {
+      await startNodeJsBackend(resolve, reject);
+    } else if (BACKEND_TYPE === 'springboot') {
+      await startSpringBootBackend(resolve, reject);
+    } else {
+      reject(new Error(`不支持的后端类型: ${BACKEND_TYPE}`));
+    }
 
     // 设置超时
     setTimeout(() => {
-      reject(new Error('Spring Boot 服务启动超时'));
+      reject(new Error('后端服务启动超时'));
     }, SERVICE_START_TIMEOUT);
   });
 }
 
-// 停止 Spring Boot 服务
-function stopSpringBootService() {
-  if (springBootProcess) {
-    console.log('[MAIN] 停止 Spring Boot 服务...');
-    springBootProcess.kill('SIGTERM');
-    springBootProcess = null;
+// 启动 Node.js 后端
+async function startNodeJsBackend(resolve, reject) {
+  console.log('[MAIN] 启动 Node.js 后端服务...');
+  
+  // 确定 Node.js 后端路径
+  const nodePath = isDev 
+    ? path.join(__dirname, '../node-mcp-backend/src/server.js')
+    : path.join(process.resourcesPath, 'app.asar.unpacked/node-backend/server.js');
+  
+  console.log('[MAIN] Node.js 后端路径:', nodePath);
+  console.log('[MAIN] 文件是否存在:', require('fs').existsSync(nodePath));
+
+  // 启动 Node.js 应用
+  backendProcess = spawn('node', [nodePath], {
+    cwd: path.dirname(nodePath),
+    env: {
+      ...process.env,
+      NODE_ENV: 'production',
+      PORT: BACKEND_PORT.toString()
+    }
+  });
+
+  backendProcess.stdout.on('data', (data) => {
+    const output = data.toString();
+    console.log(`[NODE.JS BACKEND] ${output}`);
+    
+    // 检查服务是否启动完成（监听成功消息）
+    if (output.includes('服务器已启动') || output.includes('Server started') || output.includes(`port ${BACKEND_PORT}`) || output.includes(`端口: ${BACKEND_PORT}`)) {
+      console.log('[MAIN] Node.js 后端服务启动成功');
+      setTimeout(() => {
+        resolve({ port: BACKEND_PORT, started: true });
+      }, 1000); // 等待 1 秒确保服务完全启动
+    }
+  });
+
+  backendProcess.stderr.on('data', (data) => {
+    console.error(`[NODE.JS BACKEND ERROR] ${data}`);
+  });
+
+  backendProcess.on('error', (error) => {
+    console.error('[MAIN] 启动 Node.js 后端服务失败:', error);
+    reject(error);
+  });
+
+  backendProcess.on('exit', (code) => {
+    console.log(`[MAIN] Node.js 后端服务退出, 退出码: ${code}`);
+  });
+}
+
+// 启动 Spring Boot 后端
+async function startSpringBootBackend(resolve, reject) {
+  console.log('[MAIN] 启动 Spring Boot 后端服务...');
+  
+  // 确定 JAR 文件路径
+  const jarPath = isDev 
+    ? path.join(__dirname, '../react-mcp-demo/target/react-mcp-demo-0.0.1-SNAPSHOT.jar')
+    : path.join(process.resourcesPath, 'app.asar.unpacked/spring-boot-server/react-mcp-demo-0.0.1-SNAPSHOT.jar');
+  
+  console.log('[MAIN] JAR 文件路径:', jarPath);
+  console.log('[MAIN] JAR 文件是否存在:', require('fs').existsSync(jarPath));
+
+  // 启动 Spring Boot 应用
+  backendProcess = spawn('java', ['-jar', jarPath], {
+    cwd: path.dirname(jarPath),
+  });
+
+  backendProcess.stdout.on('data', (data) => {
+    const output = data.toString();
+    console.log(`[SPRING BOOT] ${output}`);
+    
+    // 检查服务是否启动完成
+    if (output.includes('Started ReactMcpApplication')) {
+      console.log('[MAIN] Spring Boot 服务启动成功');
+      resolve({ port: BACKEND_PORT, started: true });
+    }
+  });
+
+  backendProcess.stderr.on('data', (data) => {
+    console.error(`[SPRING BOOT ERROR] ${data}`);
+  });
+
+  backendProcess.on('error', (error) => {
+    console.error('[MAIN] 启动 Spring Boot 服务失败:', error);
+    reject(error);
+  });
+}
+
+// 停止后端服务
+function stopBackendService() {
+  if (backendProcess) {
+    console.log(`[MAIN] 停止${BACKEND_TYPE === 'nodejs' ? 'Node.js' : 'Spring Boot'}后端服务...`);
+    backendProcess.kill('SIGTERM');
+    backendProcess = null;
   }
 }
 
@@ -1084,23 +1264,23 @@ app.whenReady().then(async () => {
     // 启动远程控制服务器
     startControlServer();
     
-    // 启动 Spring Boot 服务
-    const serviceInfo = await startSpringBootService();
+    // 启动后端服务
+    const serviceInfo = await startBackendService();
     
     // 创建主窗口
     createWindow();
     
     // 等待Spring Boot服务完全启动后再通知渲染进程
     setTimeout(async () => {
-      // 检查Spring Boot服务是否真的启动完成
+      // 检查后端服务是否真的启动完成
       let retries = 0;
       const maxRetries = 30; // 最多重试30次，每次2秒，总共60秒
       
       while (retries < maxRetries) {
         try {
-          const response = await fetch(`http://localhost:${serviceInfo.port}/`);
+          const response = await fetch(`http://localhost:${serviceInfo.port}/health`);
           if (response.ok) {
-            console.log('[MAIN] Spring Boot服务已完全启动，通知渲染进程');
+            console.log(`[MAIN] ${BACKEND_TYPE === 'nodejs' ? 'Node.js' : 'Spring Boot'}后端服务已完全启动，通知渲染进程`);
             
             // 通知渲染进程服务状态
             BrowserWindow.getAllWindows().forEach(window => {
@@ -1113,7 +1293,7 @@ app.whenReady().then(async () => {
             break;
           }
         } catch (error) {
-          console.log(`[MAIN] 等待Spring Boot服务启动中... (${retries + 1}/${maxRetries})`);
+          console.log(`[MAIN] 等待后端服务启动中... (${retries + 1}/${maxRetries})`);
         }
         
         retries++;
@@ -1121,17 +1301,17 @@ app.whenReady().then(async () => {
       }
       
       if (retries >= maxRetries) {
-        console.error('[MAIN] Spring Boot服务启动超时，通知渲染进程启动失败');
+        console.error('[MAIN] 后端服务启动超时，通知渲染进程启动失败');
         
         // 通知渲染进程启动失败
         BrowserWindow.getAllWindows().forEach(window => {
           window.webContents.send('service-status', {
             status: 'error',
-            message: '服务启动超时，请检查Spring Boot服务日志'
+            message: '服务启动超时，请检查后端服务日志'
           });
         });
       }
-    }, 5000); // 延迟5秒开始检查，给Spring Boot服务充分的启动时间
+    }, 5000); // 延迟5秒开始检查，给后端服务充分的启动时间
   } catch (error) {
     console.error('[MAIN] 启动失败:', error);
     
@@ -1154,7 +1334,7 @@ app.whenReady().then(async () => {
 
 // 应用关闭时停止服务
 app.on('before-quit', () => {
-  stopSpringBootService();
+  stopBackendService();
   stopControlServer();
 });
 
@@ -1168,17 +1348,19 @@ app.on('window-all-closed', () => {
 // IPC 通信处理
 ipcMain.handle('get-service-info', async () => {
   return {
-    port: SPRING_BOOT_PORT,
-    url: `http://localhost:${SPRING_BOOT_PORT}`
+    port: BACKEND_PORT,
+    url: `http://localhost:${BACKEND_PORT}`,
+    type: BACKEND_TYPE
   };
 });
 
 ipcMain.handle('check-service-status', async () => {
   try {
-    const available = await isPortAvailable(SPRING_BOOT_PORT);
+    const available = await isPortAvailable(BACKEND_PORT);
     return {
       running: !available, // 端口被占用表示服务正在运行
-      port: SPRING_BOOT_PORT
+      port: BACKEND_PORT,
+      type: BACKEND_TYPE
     };
   } catch (error) {
     return {
@@ -1188,18 +1370,20 @@ ipcMain.handle('check-service-status', async () => {
   }
 });
 
-// 处理 spring-boot-status IPC 请求
+// 处理 spring-boot-status IPC 请求（保持兼容性）
 ipcMain.handle('spring-boot-status', async () => {
   try {
-    const available = await isPortAvailable(SPRING_BOOT_PORT);
+    const available = await isPortAvailable(BACKEND_PORT);
     return {
       running: !available, // 端口被占用表示服务正在运行
-      port: SPRING_BOOT_PORT
+      port: BACKEND_PORT,
+      type: BACKEND_TYPE
     };
   } catch (error) {
     return {
       running: false,
-      port: SPRING_BOOT_PORT,
+      port: BACKEND_PORT,
+      type: BACKEND_TYPE,
       error: error.message
     };
   }

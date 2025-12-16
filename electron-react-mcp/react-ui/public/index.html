@@ -407,8 +407,13 @@
 
             eventSource.addEventListener('action', (e) => {
                 const data = JSON.parse(e.data);
-                const toolDesc = getToolDescription(data.toolName, data.toolInput);
-                appendStep('action', '🔧 调用工具', toolDesc);
+                // Node.js 后端直接在 content 中发送格式化的工具调用信息
+                appendStep('action', '🔧 调用工具', data.content);
+            });
+
+            eventSource.addEventListener('observation', (e) => {
+                const data = JSON.parse(e.data);
+                appendStep('observation', '👁️ 执行结果', data.content);
             });
 
             eventSource.addEventListener('final_answer', (e) => {

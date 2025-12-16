@@ -2,6 +2,7 @@ import { MathTools } from './mathTools.js';
 import { FileSystemTools } from './fileSystemTools.js';
 import { DocumentReaderTools } from './documentReaderTools.js';
 import { PlaywrightTools } from './playwrightTools.js';
+import { CommandTools } from './commandTools.js';
 
 /**
  * 工具注册器 - 统一管理所有工具
@@ -13,7 +14,8 @@ export class ToolRegistry {
       math: MathTools,
       fileSystem: FileSystemTools,
       document: DocumentReaderTools,
-      playwright: this.playwrightTools
+      playwright: this.playwrightTools,
+      command: CommandTools
     };
   }
 
@@ -27,6 +29,7 @@ export class ToolRegistry {
     allTools.push(...FileSystemTools.getToolDefinitions());
     allTools.push(...DocumentReaderTools.getToolDefinitions());
     allTools.push(...PlaywrightTools.getToolDefinitions());
+    allTools.push(...CommandTools.getToolDefinitions());
     
     return allTools;
   }
@@ -53,10 +56,20 @@ export class ToolRegistry {
       return await DocumentReaderTools.executeTool(toolName, args);
     }
 
-    // Playwright 工具
-    const browserTools = ['navigate', 'click', 'fill', 'screenshot', 'getPageContent', 'getConsoleLogs'];
+    // Playwright 工具（14个，移除getPageContent避免内容过长）
+    const browserTools = [
+      'navigate', 'click', 'fill', 'press', 'hover', 'select',
+      'goBack', 'goForward', 'reload', 'waitForSelector', 'screenshot',
+      'getPageUrl', 'getPageTitle', 'getConsoleLogs'
+    ];
     if (browserTools.includes(toolName)) {
       return await this.playwrightTools.executeTool(toolName, args);
+    }
+
+    // 命令执行工具
+    const commandTools = ['executeCommand', 'executeScript'];
+    if (commandTools.includes(toolName)) {
+      return await CommandTools.executeTool(toolName, args);
     }
 
     throw new Error(`Unknown tool: ${toolName}`);

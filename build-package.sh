@@ -2,10 +2,9 @@
 
 ###############################################################################
 # ReAct MCP 客户端打包脚本
-# 功能：后端编译 → JAR 复制 → 客户端打包 → 生成安装包
+# 功能：复制 Node.js 后端 → React UI 编译 → 客户端打包 → 生成安装包
 # 用法：
-#   ./build-package.sh              # 完整流程（编译后端 + 打包客户端）
-#   ./build-package.sh --skip-backend  # 跳过后端编译（仅打包客户端）
+#   ./build-package.sh              # 完整流程（复制后端 + 打包客户端）
 ###############################################################################
 
 set -e  # 遇到错误立即退出
@@ -19,9 +18,8 @@ NC='\033[0m' # No Color
 
 # 项目根目录
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
-BACKEND_DIR="$PROJECT_ROOT/react-mcp-demo"
+BACKEND_DIR="$PROJECT_ROOT/node-mcp-backend"
 FRONTEND_DIR="$PROJECT_ROOT/electron-react-mcp"
-JAR_NAME="react-mcp-demo-0.0.1-SNAPSHOT.jar"
 
 # 日志函数
 log_info() {
@@ -42,77 +40,39 @@ log_error() {
 
 # 检查参数
 SKIP_BACKEND=false
-if [[ "$1" == "--skip-backend" ]]; then
-    SKIP_BACKEND=true
-    log_warning "跳过后端编译，直接使用现有 JAR 文件"
-fi
 
 # 打印横幅
 echo ""
 echo "╔════════════════════════════════════════════════════════════════╗"
 echo "║         ReAct MCP 客户端打包脚本                              ║"
-echo "║         Electron + Spring Boot 一体化打包                     ║"
+echo "║         Electron + Node.js 一体化打包                        ║"
 echo "╚════════════════════════════════════════════════════════════════╝"
 echo ""
 
 ###############################################################################
-# 步骤 1: 编译 Spring Boot 后端（可选）
+# 步骤 1/3: 复制 Node.js 后端到客户端目录
 ###############################################################################
-if [ "$SKIP_BACKEND" = false ]; then
-    log_info "步骤 1/4: 编译 Spring Boot 后端..."
-    cd "$BACKEND_DIR"
-    
-    if [ ! -f "pom.xml" ]; then
-        log_error "未找到 pom.xml 文件，请检查后端项目路径"
-        exit 1
-    fi
-    
-    log_info "执行 Maven 编译: mvn clean package -DskipTests"
-    mvn clean package -DskipTests
-    
-    if [ ! -f "target/$JAR_NAME" ]; then
-        log_error "JAR 文件编译失败，未找到 target/$JAR_NAME"
-        exit 1
-    fi
-    
-    log_success "后端编译完成: target/$JAR_NAME"
-    
-    ###############################################################################
-    # 步骤 2: 复制 JAR 到客户端目录
-    ###############################################################################
-    log_info "步骤 2/4: 复制 JAR 文件到客户端项目..."
-    TARGET_DIR="$FRONTEND_DIR/spring-boot-server"
-    
-    # 确保目标目录存在
-    mkdir -p "$TARGET_DIR"
-    
-    # 复制 JAR 文件
-    cp "target/$JAR_NAME" "$TARGET_DIR/"
-    
-    if [ -f "$TARGET_DIR/$JAR_NAME" ]; then
-        log_success "JAR 文件已复制到: $TARGET_DIR/$JAR_NAME"
-    else
-        log_error "JAR 文件复制失败"
-        exit 1
-    fi
+log_info "步骤 1/3: 复制 Node.js 后端到客户端项目..."
+TARGET_DIR="$FRONTEND_DIR/node-backend"
+
+# 确保目标目录存在
+mkdir -p "$TARGET_DIR"
+
+# 复制 Node.js 后端文件
+log_info "正在复制 node-mcp-backend 到 $TARGET_DIR"
+cp -r "$BACKEND_DIR/"* "$TARGET_DIR/"
+
+if [ -f "$TARGET_DIR/package.json" ]; then
+    log_success "Node.js 后端已复制到: $TARGET_DIR"
 else
-    log_info "步骤 1/4: 跳过后端编译（使用现有 JAR）"
-    log_info "步骤 2/4: 跳过 JAR 复制（使用现有 JAR）"
-    
-    # 检查 JAR 是否存在
-    if [ ! -f "$FRONTEND_DIR/spring-boot-server/$JAR_NAME" ]; then
-        log_error "未找到现有 JAR 文件: $FRONTEND_DIR/spring-boot-server/$JAR_NAME"
-        log_error "请先编译后端或移除 --skip-backend 参数"
-        exit 1
-    fi
-    
-    log_success "使用现有 JAR: $FRONTEND_DIR/spring-boot-server/$JAR_NAME"
+    log_error "Node.js 后端复制失败"
+    exit 1
 fi
 
 ###############################################################################
-# 步骤 3: 安装客户端依赖（如果需要）
+# 步骤 2/3: 安装客户端依赖（如果需要）
 ###############################################################################
-log_info "步骤 3/4: 检查并安装客户端依赖..."
+log_info "步骤 2/3: 检查并安装客户端依赖..."
 cd "$FRONTEND_DIR"
 
 if [ ! -d "node_modules" ]; then
@@ -124,9 +84,9 @@ else
 fi
 
 ###############################################################################
-# 步骤 4: 打包客户端生成安装包
+# 步骤 3/3: 打包客户端生成安装包
 ###############################################################################
-log_info "步骤 4/4: 打包 Electron 客户端..."
+log_info "步骤 3/3: 打包 Electron 客户端..."
 log_info "执行 electron-builder 打包..."
 
 npm run dist

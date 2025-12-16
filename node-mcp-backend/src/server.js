@@ -113,6 +113,22 @@ app.get('/config', (req, res) => {
   });
 });
 
+/**
+ * 获取记忆统计信息
+ */
+app.get('/memory/stats', (req, res) => {
+  try {
+    const stats = agent.getMemoryStats();
+    res.json({
+      success: true,
+      stats
+    });
+  } catch (error) {
+    console.error('Memory stats error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // 启动服务器
 app.listen(PORT, () => {
   console.log(`
@@ -127,6 +143,7 @@ app.listen(PORT, () => {
 ║  接口:                                                  ║
 ║  - GET  /health           健康检查                      ║
 ║  - GET  /config           配置信息                      ║
+║  - GET  /memory/stats     记忆统计                      ║
 ║  - GET  /react/solve      同步任务执行                  ║
 ║  - GET  /react/solve-stream  流式任务执行（SSE）        ║
 ╚════════════════════════════════════════════════════════╝
