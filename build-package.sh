@@ -2,7 +2,7 @@
 
 ###############################################################################
 # ReAct MCP 客户端打包脚本
-# 功能：复制 Node.js 后端 → 客户端打包 → 生成安装包
+# 功能：安装依赖 → 构建 React UI → 打包生成安装包
 # 用法：
 #   ./build-package.sh                    # 交互式选择平台
 #   ./build-package.sh --mac              # 仅打包 macOS
@@ -23,7 +23,6 @@ NC='\033[0m' # No Color
 
 # 项目根目录
 PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
-BACKEND_DIR="$PROJECT_ROOT/node-mcp-backend"
 FRONTEND_DIR="$PROJECT_ROOT/electron-react-mcp"
 
 # 日志函数
@@ -105,29 +104,9 @@ echo "╚═══════════════════════�
 echo ""
 
 ###############################################################################
-# 步骤 1/3: 复制 Node.js 后端到客户端目录
+# 步骤 1/4: 安装客户端依赖（如果需要）
 ###############################################################################
-log_info "步骤 1/3: 复制 Node.js 后端到客户端项目..."
-TARGET_DIR="$FRONTEND_DIR/node-backend"
-
-# 确保目标目录存在
-mkdir -p "$TARGET_DIR"
-
-# 复制 Node.js 后端文件
-log_info "正在复制 node-mcp-backend 到 $TARGET_DIR"
-cp -r "$BACKEND_DIR/"* "$TARGET_DIR/"
-
-if [ -f "$TARGET_DIR/package.json" ]; then
-    log_success "Node.js 后端已复制到: $TARGET_DIR"
-else
-    log_error "Node.js 后端复制失败"
-    exit 1
-fi
-
-###############################################################################
-# 步骤 2/3: 安装客户端依赖（如果需要）
-###############################################################################
-log_info "步骤 2/3: 检查并安装客户端依赖..."
+log_info "步骤 1/4: 检查并安装客户端依赖..."
 cd "$FRONTEND_DIR"
 
 if [ ! -d "node_modules" ]; then
@@ -139,10 +118,56 @@ else
 fi
 
 ###############################################################################
-# 步骤 3/4: 选择打包平台（交互式或命令行参数）
+# 步骤 2/4: 安装 Node.js 后端依赖
+###############################################################################
+log_info "步骤 2/4: 安装 Node.js 后端依赖..."
+NODE_BACKEND_DIR="$FRONTEND_DIR/node-backend"
+
+if [ -d "$NODE_BACKEND_DIR" ]; then
+    cd "$NODE_BACKEND_DIR"
+    if [ ! -d "node_modules" ]; then
+        log_info "node-backend/node_modules 不存在，执行 npm install..."
+        npm install --production
+        log_success "Node.js 后端依赖安装完成"
+    else
+        log_info "node-backend/node_modules 已存在"
+    fi
+    cd "$FRONTEND_DIR"
+else
+    log_error "Node.js 后端目录不存在: $NODE_BACKEND_DIR"
+    exit 1
+fi
+
+###############################################################################
+# 步骤 3/4: 构建 React UI
+###############################################################################
+log_info "步骤 3/4: 构建 React UI..."
+REACT_UI_DIR="$FRONTEND_DIR/react-ui"
+
+if [ -d "$REACT_UI_DIR" ]; then
+    cd "$REACT_UI_DIR"
+    if [ ! -d "node_modules" ]; then
+        log_info "React UI node_modules 不存在，安装依赖..."
+        npm install
+    fi
+    log_info "构建 React UI..."
+    npm run build
+    if [ -d "build" ]; then
+        log_success "React UI 构建完成"
+    else
+        log_error "React UI 构建失败"
+        exit 1
+    fi
+    cd "$FRONTEND_DIR"
+else
+    log_warning "React UI 目录不存在，跳过构建"
+fi
+
+###############################################################################
+# 选择打包平台（交互式或命令行参数）
 ###############################################################################
 if [ "$INTERACTIVE" = true ]; then
-    log_info "步骤 3/4: 选择打包平台..."
+    log_info "选择打包平台..."
     echo ""
     echo "请选择打包平台:"
     echo "  1) Mac (dmg)"
@@ -210,6 +235,31 @@ case $PLATFORM in
         exit 1
         ;;
 esac
+
+###############################################################################
+# 步骤 5: 复制后端 node_modules 到打包结果
+###############################################################################
+log_info "复制 node-backend/node_modules 到打包结果..."
+
+# macOS
+MAC_APP_PATH="dist/mac/ReAct MCP 客户端.app/Contents/Resources/app.asar.unpacked/node-backend"
+if [ -d "$MAC_APP_PATH" ]; then
+    if [ -d "node-backend/node_modules" ]; then
+        log_info "复制 node_modules 到 macOS 应用..."
+        cp -R node-backend/node_modules "$MAC_APP_PATH/"
+        log_success "macOS 后端依赖复制完成"
+    fi
+fi
+
+# Windows
+WIN_APP_PATH="dist/win-unpacked/resources/app.asar.unpacked/node-backend"
+if [ -d "$WIN_APP_PATH" ]; then
+    if [ -d "node-backend/node_modules" ]; then
+        log_info "复制 node_modules 到 Windows 应用..."
+        cp -R node-backend/node_modules "$WIN_APP_PATH/"
+        log_success "Windows 后端依赖复制完成"
+    fi
+fi
 
 # 检查打包结果
 if [ -d "dist" ]; then

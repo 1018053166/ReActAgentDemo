@@ -1,0 +1,383 @@
+[
+  {
+    "id": "1765875327088",
+    "timestamp": "2025-12-16T08:55:27.088Z",
+    "task": "打开百度首页，搜索 Spring Boot 教程",
+    "steps": [
+      {
+        "type": "action",
+        "iteration": 1,
+        "content": "navigate(url: \"https://www.baidu.com\")"
+      },
+      {
+        "type": "observation",
+        "iteration": 1,
+        "content": "成功导航到: https://www.baidu.com"
+      },
+      {
+        "type": "action",
+        "iteration": 2,
+        "content": "waitForSelector(selector: \"input[name='wd']\", timeout: 30000)"
+      },
+      {
+        "type": "observation",
+        "iteration": 2,
+        "content": "浏览器自动化操作 [waitForSelector] - 参数: {\"selector\":\"input[name='wd']\",\"timeout\":30000}\n提示: 请确保 Electron 客户端已启动并开启远程调试端口 9222"
+      },
+      {
+        "type": "action",
+        "iteration": 3,
+        "content": "fill(selector: \"input[name='wd']\", value: \"Spring Boot 教程\")"
+      },
+      {
+        "type": "observation",
+        "iteration": 3,
+        "content": "浏览器自动化操作 [fill] - 参数: {\"selector\":\"input[name='wd']\",\"value\":\"Spring Boot 教程\"}\n提示: 请确保 Electron 客户端已启动并开启远程调试端口 9222"
+      },
+      {
+        "type": "action",
+        "iteration": 4,
+        "content": "press(key: \"Enter\")"
+      },
+      {
+        "type": "observation",
+        "iteration": 4,
+        "content": "成功按下按键: Enter"
+      }
+    ],
+    "result": "已成功在百度搜索 \"Spring Boot 教程\"，并提交了搜索请求。",
+    "success": true,
+    "toolsUsed": [
+      "navigate",
+      "waitForSelector",
+      "fill",
+      "press"
+    ],
+    "complexity": 8
+  },
+  {
+    "id": "1765875301892",
+    "timestamp": "2025-12-16T08:55:01.892Z",
+    "task": "打开百度首页，搜索 Spring Boot 教程",
+    "steps": [
+      {
+        "type": "action",
+        "iteration": 1,
+        "content": "navigate(url: \"https://www.baidu.com\")"
+      },
+      {
+        "type": "observation",
+        "iteration": 1,
+        "content": "成功导航到: https://www.baidu.com"
+      },
+      {
+        "type": "action",
+        "iteration": 2,
+        "content": "waitForSelector(selector: \"input[name='wd']\", timeout: 30000)"
+      },
+      {
+        "type": "observation",
+        "iteration": 2,
+        "content": "浏览器自动化操作 [waitForSelector] - 参数: {\"selector\":\"input[name='wd']\",\"timeout\":30000}\n提示: 请确保 Electron 客户端已启动并开启远程调试端口 9222"
+      },
+      {
+        "type": "action",
+        "iteration": 3,
+        "content": "fill(selector: \"input[name='wd']\", value: \"Spring Boot 教程\")"
+      },
+      {
+        "type": "observation",
+        "iteration": 3,
+        "content": "浏览器自动化操作 [fill] - 参数: {\"selector\":\"input[name='wd']\",\"value\":\"Spring Boot 教程\"}\n提示: 请确保 Electron 客户端已启动并开启远程调试端口 9222"
+      },
+      {
+        "type": "action",
+        "iteration": 4,
+        "content": "press(key: \"Enter\")"
+      },
+      {
+        "type": "observation",
+        "iteration": 4,
+        "content": "成功按下按键: Enter"
+      }
+    ],
+    "result": "已成功在百度搜索 \"Spring Boot 教程\"，并提交了搜索请求。",
+    "success": true,
+    "toolsUsed": [
+      "navigate",
+      "waitForSelector",
+      "fill",
+      "press"
+    ],
+    "complexity": 8
+  },
+  {
+    "id": "1765875214441",
+    "timestamp": "2025-12-16T08:53:34.441Z",
+    "task": "打开百度首页，搜索 Spring Boot 教程",
+    "steps": [
+      {
+        "type": "action",
+        "iteration": 1,
+        "content": "navigate(url: \"https://www.baidu.com\")"
+      },
+      {
+        "type": "observation",
+        "iteration": 1,
+        "content": "成功导航到: https://www.baidu.com"
+      },
+      {
+        "type": "action",
+        "iteration": 2,
+        "content": "waitForSelector(selector: \"input[name='wd']\", timeout: 30000)"
+      },
+      {
+        "type": "observation",
+        "iteration": 2,
+        "content": "浏览器自动化操作 [waitForSelector] - 参数: {\"selector\":\"input[name='wd']\",\"timeout\":30000}\n提示: 请确保 Electron 客户端已启动并开启远程调试端口 9222"
+      },
+      {
+        "type": "action",
+        "iteration": 3,
+        "content": "fill(selector: \"input[name='wd']\", value: \"Spring Boot 教程\")"
+      },
+      {
+        "type": "observation",
+        "iteration": 3,
+        "content": "浏览器自动化操作 [fill] - 参数: {\"selector\":\"input[name='wd']\",\"value\":\"Spring Boot 教程\"}\n提示: 请确保 Electron 客户端已启动并开启远程调试端口 9222"
+      },
+      {
+        "type": "action",
+        "iteration": 4,
+        "content": "press(key: \"Enter\")"
+      },
+      {
+        "type": "observation",
+        "iteration": 4,
+        "content": "成功按下按键: Enter"
+      }
+    ],
+    "result": "Thought: 已成功在百度搜索 \"Spring Boot 教程\"，并提交了搜索请求\nFinal Answer: 已在百度搜索 \"Spring Boot 教程\"，搜索结果页面已打开。",
+    "success": true,
+    "toolsUsed": [
+      "navigate",
+      "waitForSelector",
+      "fill",
+      "press"
+    ],
+    "complexity": 8
+  },
+  {
+    "id": "1765875158368",
+    "timestamp": "2025-12-16T08:52:38.368Z",
+    "task": "访问 https://baidu.com 并获取页面标题",
+    "steps": [
+      {
+        "type": "action",
+        "iteration": 1,
+        "content": "navigate(url: \"https://baidu.com\")"
+      },
+      {
+        "type": "observation",
+        "iteration": 1,
+        "content": "成功导航到: https://baidu.com"
+      },
+      {
+        "type": "action",
+        "iteration": 2,
+        "content": "getPageTitle()"
+      },
+      {
+        "type": "observation",
+        "iteration": 2,
+        "content": "当前页面标题: 百度一下，你就知道"
+      }
+    ],
+    "result": "当前页面的标题是：“百度一下，你就知道”。",
+    "success": true,
+    "toolsUsed": [
+      "navigate",
+      "getPageTitle"
+    ],
+    "complexity": 4
+  },
+  {
+    "id": "1765875138156",
+    "timestamp": "2025-12-16T08:52:18.156Z",
+    "task": "打开百度首页，搜索 Spring Boot 教程",
+    "steps": [
+      {
+        "type": "action",
+        "iteration": 1,
+        "content": "navigate(url: \"https://www.baidu.com\")"
+      },
+      {
+        "type": "observation",
+        "iteration": 1,
+        "content": "成功导航到: https://www.baidu.com"
+      },
+      {
+        "type": "action",
+        "iteration": 2,
+        "content": "waitForSelector(selector: \"input[name='wd']\", timeout: 30000)"
+      },
+      {
+        "type": "observation",
+        "iteration": 2,
+        "content": "浏览器自动化操作 [waitForSelector] - 参数: {\"selector\":\"input[name='wd']\",\"timeout\":30000}\n提示: 请确保 Electron 客户端已启动并开启远程调试端口 9222"
+      },
+      {
+        "type": "action",
+        "iteration": 3,
+        "content": "fill(selector: \"input[name='wd']\", value: \"Spring Boot 教程\")"
+      },
+      {
+        "type": "observation",
+        "iteration": 3,
+        "content": "浏览器自动化操作 [fill] - 参数: {\"selector\":\"input[name='wd']\",\"value\":\"Spring Boot 教程\"}\n提示: 请确保 Electron 客户端已启动并开启远程调试端口 9222"
+      },
+      {
+        "type": "action",
+        "iteration": 4,
+        "content": "press(key: \"Enter\")"
+      },
+      {
+        "type": "observation",
+        "iteration": 4,
+        "content": "成功按下按键: Enter"
+      }
+    ],
+    "result": "Thought: 已成功在百度搜索 \"Spring Boot 教程\"，并提交了搜索请求\nFinal Answer: 已在百度搜索 \"Spring Boot 教程\"，搜索结果页面已打开。",
+    "success": true,
+    "toolsUsed": [
+      "navigate",
+      "waitForSelector",
+      "fill",
+      "press"
+    ],
+    "complexity": 8
+  },
+  {
+    "id": "1765875116201",
+    "timestamp": "2025-12-16T08:51:56.201Z",
+    "task": "打开百度首页，搜索 Spring Boot 教程",
+    "steps": [
+      {
+        "type": "action",
+        "iteration": 1,
+        "content": "navigate(url: \"https://www.baidu.com\")"
+      },
+      {
+        "type": "observation",
+        "iteration": 1,
+        "content": "成功导航到: https://www.baidu.com"
+      },
+      {
+        "type": "action",
+        "iteration": 2,
+        "content": "waitForSelector(selector: \"input[name='wd']\", timeout: 30000)"
+      },
+      {
+        "type": "observation",
+        "iteration": 2,
+        "content": "浏览器自动化操作 [waitForSelector] - 参数: {\"selector\":\"input[name='wd']\",\"timeout\":30000}\n提示: 请确保 Electron 客户端已启动并开启远程调试端口 9222"
+      },
+      {
+        "type": "action",
+        "iteration": 3,
+        "content": "fill(selector: \"input[name='wd']\", value: \"Spring Boot 教程\")"
+      },
+      {
+        "type": "observation",
+        "iteration": 3,
+        "content": "浏览器自动化操作 [fill] - 参数: {\"selector\":\"input[name='wd']\",\"value\":\"Spring Boot 教程\"}\n提示: 请确保 Electron 客户端已启动并开启远程调试端口 9222"
+      },
+      {
+        "type": "action",
+        "iteration": 4,
+        "content": "press(key: \"Enter\")"
+      },
+      {
+        "type": "observation",
+        "iteration": 4,
+        "content": "成功按下按键: Enter"
+      }
+    ],
+    "result": "Thought: 已成功在百度搜索 \"Spring Boot 教程\"，并提交了搜索请求\nFinal Answer: 已在百度搜索 \"Spring Boot 教程\"，搜索结果页面已打开。",
+    "success": true,
+    "toolsUsed": [
+      "navigate",
+      "waitForSelector",
+      "fill",
+      "press"
+    ],
+    "complexity": 8
+  },
+  {
+    "id": "1765870977599",
+    "timestamp": "2025-12-16T07:42:57.599Z",
+    "task": "打开百度首页，搜索 Spring Boot 教程",
+    "steps": [
+      {
+        "type": "action",
+        "iteration": 1,
+        "content": "navigate(url: \"https://www.baidu.com\")"
+      },
+      {
+        "type": "observation",
+        "iteration": 1,
+        "content": "成功导航到: https://www.baidu.com"
+      },
+      {
+        "type": "action",
+        "iteration": 2,
+        "content": "fill(selector: \"input#kw\", value: \"Spring Boot 教程\")"
+      },
+      {
+        "type": "observation",
+        "iteration": 2,
+        "content": "浏览器自动化操作 [fill] - 参数: {\"selector\":\"input#kw\",\"value\":\"Spring Boot 教程\"}\n提示: 请确保 Electron 客户端已启动并开启远程调试端口 9222"
+      },
+      {
+        "type": "action",
+        "iteration": 3,
+        "content": "press(key: \"Enter\")"
+      },
+      {
+        "type": "observation",
+        "iteration": 3,
+        "content": "成功按下按键: Enter"
+      },
+      {
+        "type": "action",
+        "iteration": 4,
+        "content": "waitForSelector(selector: \"div.result\", timeout: 5000)"
+      },
+      {
+        "type": "observation",
+        "iteration": 4,
+        "content": "浏览器自动化操作 [waitForSelector] - 参数: {\"selector\":\"div.result\",\"timeout\":5000}\n提示: 请确保 Electron 客户端已启动并开启远程调试端口 9222"
+      },
+      {
+        "type": "action",
+        "iteration": 5,
+        "content": "getPageContent()"
+      },
+      {
+        "type": "observation",
+        "iteration": 5,
+        "content": "工具执行失败: Unknown tool: getPageContent"
+      }
+    ],
+    "result": "Agent 执行异常: Request failed with status code 400",
+    "success": false,
+    "toolsUsed": [
+      "navigate",
+      "fill",
+      "press",
+      "waitForSelector",
+      "getPageContent"
+    ],
+    "complexity": 10
+  }
+]

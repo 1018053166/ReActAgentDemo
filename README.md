@@ -102,8 +102,8 @@ sequenceDiagram
     User->>UI: 1. 输入任务
     UI->>Preload: 2. window.electronAPI.invoke('get-service-info')
     Preload->>Main: 3. ipcMain.handle('get-service-info')
-    Main->>Main: 4. 检测端口 :8080
-    Main-->>Preload: 5. return {running: true, port: 8080, type: 'nodejs'}
+    Main->>Main: 4. 检测后端服务状态
+    Main-->>Preload: 5. return {running: true, type: 'nodejs'}
     Preload-->>UI: 6. Promise resolve
     
     UI->>NodeBackend: 7. HTTP GET /react/solve-stream?task=...
@@ -124,20 +124,16 @@ graph TD
     B --> C[首次启动 .app]
     
     C --> D[Main Process 启动]
-    D --> E{检测端口 :8080}
+    D --> E[动态 import 后端模块]
     
-    E -->|端口空闲| F[启动 Node.js 后端服务]
-    E -->|端口占用| G[连接已运行服务]
+    E --> F{Node.js 文件路径判断}
     
-    F --> H[spawn node server.js]
-    H --> I{Node.js 文件路径判断}
+    F -->|开发模式<br/>isDev=true| G[加载 ./node-backend/src/server.js]
+    F -->|打包模式<br/>isDev=false| H[加载 app.asar.unpacked/node-backend/src/server.js]
     
-    I -->|开发模式<br/>isDev=true| J[加载 ../node-mcp-backend/src/server.js]
-    I -->|打包模式<br/>isDev=false| K[加载 app.asar.unpacked/node-backend/server.js]
-    
-    J --> L[等待服务启动<br/>监听日志: 服务器已启动]
-    K --> L
-    G --> L
+    G --> I[调用 startServer() 启动服务]
+    H --> I
+    I --> L[后端服务就绪]
     
     L --> M[创建主窗口 BrowserWindow]
     M --> N{UI 文件路径判断}
@@ -185,30 +181,29 @@ ReAct MCP 客户端.app/
 
 ```
 MCP/
-├── electron-react-mcp/              # Electron 客户端项目
-│   ├── main.js                      # 主进程（窗口管理、服务启动）
+├── electron-react-mcp/              # Electron 客户端项目（一体化工程）
+│   ├── main.js                      # 主进程（窗口管理、后端启动）
 │   ├── preload.js                   # 预加载脚本（IPC 桥接）
 │   ├── package.json                 # 依赖配置 + 打包配置
+│   ├── node-backend/                # Node.js 后端（内嵌）
+│   │   ├── src/
+│   │   │   ├── server.js            # 后端入口
+│   │   │   ├── agent/
+│   │   │   │   └── reactAgent.js    # ReAct Agent 实现
+│   │   │   ├── tools/
+│   │   │   │   ├── toolRegistry.js  # 工具注册中心
+│   │   │   │   └── playwrightTools.js # 浏览器工具
+│   │   │   └── config/
+│   │   │       └── llmConfig.js     # LLM 配置
+│   │   └── package.json
 │   ├── react-ui/                    # React UI 前端
 │   │   ├── public/
 │   │   │   └── index.html          # 主界面（开发模式）
 │   │   └── build/                   # 构建产物（打包模式）
 │   └── dist/                        # 打包输出目录
 │       └── ReAct MCP 客户端-1.0.0.dmg
-│
-└── node-mcp-backend/                # Node.js 后端项目
-    ├── src/
-    │   ├── server.js                # 后端入口
-    │   ├── agent/
-    │   │   └── reactAgent.js        # ReAct Agent 实现
-    │   ├── tools/
-    │   │   ├── toolRegistry.js      # 工具注册中心
-    │   │   ├── mathTools.js         # 数学工具
-    │   │   ├── fileTools.js         # 文件工具
-    │   │   └── playwrightTools.js   # 浏览器工具
-    │   └── config/
-    │       └── llmConfig.js         # LLM 配置
-    └── package.json
+├── build-package.sh                 # 打包脚本
+└── start-frontend.sh                # 开发启动脚本
 ```
 
 ## 🛠 技术栈
@@ -331,19 +326,6 @@ MCP/
 - ✅ 启动 Electron 客户端
 - ✅ 自动启动内嵌 Node.js 后端服务
 
-#### 3. 后端启动脚本 `start-backend.sh`
-
-**启动 Node.js 后端**:
-```bash
-cd node-mcp-backend
-npm start
-```
-
-**功能说明**:
-- ✅ 自动检查端口占用
-- ✅ 启动 Node.js Express 服务
-- ✅ 显示服务地址和 API 端点
-
 ---
 
 ### 方式一：使用安装包（终端用户）
@@ -378,48 +360,13 @@ npm start
 
 #### 手动启动
 
-**1. 安装后端依赖**
-```bash
-cd node-mcp-backend
-npm install
-```
-
-**2. 启动客户端**
 ```bash
 cd electron-react-mcp
 npm install
 npm start
 ```
 
-> **注意**：开发模式下，Electron 会自动从 `node-mcp-backend/src/` 目录加载 Node.js 后端并启动服务。
-
-### 方式三：分离启动（调试模式）
-
-#### 快速启动（推荐）
-```bash
-# 终端 1: 启动后端
-cd node-mcp-backend
-npm start
-
-# 终端 2: 启动客户端
-./start-frontend.sh
-```
-
-#### 手动启动
-
-**1. 手动启动后端**
-```bash
-cd node-mcp-backend
-npm start
-```
-
-**2. 启动客户端**
-```bash
-cd electron-react-mcp
-npm start
-```
-
-> **说明**：此模式下 Electron 检测到 8080 端口已被占用，会直接连接现有服务。
+> **注意**：Electron 启动时会自动加载内嵌的 Node.js 后端服务，无需单独启动。
 
 ## ⚙️ 配置说明
 
@@ -430,8 +377,8 @@ npm start
 #### 步骤 1：创建本地环境变量文件
 
 ```bash
-# 复制环境变量模板到 node-mcp-backend
-cd node-mcp-backend
+# 复制环境变量模板
+cd electron-react-mcp/node-backend
 cp .env.example .env
 
 # 编辑 .env 文件，填写真实的 API Key
@@ -456,8 +403,7 @@ OPENAI_MODEL_NAME=gpt-4o-mini
 项目会自动加载 `.env` 文件中的环境变量:
 
 ```bash
-cd node-mcp-backend
-npm start
+./start-frontend.sh
 ```
 
 ---
@@ -505,7 +451,7 @@ OPENAI_MODEL=your-model-name
 
 ### 后端服务配置
 
-配置文件位于 `node-mcp-backend/src/config/llmConfig.js`：
+配置文件位于 `electron-react-mcp/node-backend/src/config/llmConfig.js`：
 
 ```javascript
 // LLM 配置
@@ -598,31 +544,118 @@ const info = await window.electronAPI.invoke('get-service-info');
 ```http
 GET http://localhost:9222/browser/navigate?url=https://www.baidu.com
 ```
+**返回**: `{ success: true, message: 'Navigation started', url: '...' }`
 
 #### 2. 点击元素
 ```http
 GET http://localhost:9222/browser/click?selector=#su
 ```
+**参数**: `selector` - CSS 选择器  
+**返回**: `{ success: true, message: 'Click executed successfully' }`
 
 #### 3. 填写输入框
 ```http
 GET http://localhost:9222/browser/fill?selector=#kw&text=人工智能
 ```
+**参数**: 
+- `selector` - CSS 选择器
+- `text` - 要填充的文本  
 
-#### 4. 获取可见文本
+**返回**: `{ success: true, message: 'Fill executed successfully' }`
+
+#### 4. 按键操作
 ```http
-GET http://localhost:9222/browser/getVisibleText
+GET http://localhost:9222/browser/press?key=Enter
 ```
+**参数**: `key` - 键盘按键名（如 Enter、Tab、Escape 等）  
+**返回**: `{ success: true, message: 'Pressed key: Enter' }`
 
-#### 5. 获取 HTML
+#### 5. 获取页面 URL
+```http
+GET http://localhost:9222/browser/getPageUrl
+```
+**返回**: `{ success: true, url: 'https://...' }`
+
+#### 6. 获取页面标题
+```http
+GET http://localhost:9222/browser/getPageTitle
+```
+**返回**: `{ success: true, title: '...' }`
+
+#### 7. 获取页面信息
+```http
+GET http://localhost:9222/browser/getPageInfo
+```
+**返回**: `{ success: true, result: { url: '...', title: '...' } }`
+
+#### 8. 获取可见文本
+```http
+GET http://localhost:9222/browser/getVisibleText?selector=body
+```
+**参数**: `selector` - CSS 选择器（可选，默认 body）  
+**返回**: `{ success: true, result: '页面可见文本内容...' }`
+
+#### 9. 获取 HTML
 ```http
 GET http://localhost:9222/browser/getVisibleHtml?selector=body&cleanHtml=true
 ```
+**参数**: 
+- `selector` - CSS 选择器（可选，默认 html）
+- `cleanHtml` - 是否清理 script/style 标签（true/false）  
 
-#### 6. 页面截图
+**返回**: `{ success: true, result: '<html>...</html>' }`
+
+#### 10. 执行 JavaScript
+```http
+POST http://localhost:9222/browser/executeJs
+Content-Type: application/json
+
+{"script": "document.querySelector('#kw').value"}
+```
+**Body**: `{ script: '要执行的 JavaScript 代码' }`  
+**返回**: `{ success: true, result: '执行结果' }`
+
+#### 11. 页面分析
+```http
+GET http://localhost:9222/browser/analyzePage
+```
+**返回**: 完整的页面结构分析，包括：
+- 页面基本信息（URL、标题、时间戳）
+- Meta 标签
+- 标题结构（h1-h6）
+- 表单信息
+- 链接列表
+- 图片信息
+- 输入框和按钮
+- 表格和列表
+- 脚本和样式表
+- 性能指标
+
+#### 12. 获取控制台日志
+```http
+GET http://localhost:9222/browser/consoleLogs?type=all&limit=50
+```
+**参数**: 
+- `type` - 日志类型（可选，默认 all）
+- `limit` - 日志数量限制（可选，默认 50）  
+
+**返回**: `{ success: true, result: [{ type: 'log', message: '...', timestamp: '...' }] }`
+
+#### 13. 页面截图
 ```http
 GET http://localhost:9222/browser/screenshot?fullPage=true
 ```
+**参数**: 
+- `fullPage` - 是否截取完整页面（true/false）
+- `selector` - 截取特定元素（可选）  
+
+**返回**: `{ success: true, result: 'base64编码的PNG图片...' }`
+
+#### 14. 调试：获取输入框信息
+```http
+GET http://localhost:9222/browser/debug/inputs
+```
+**返回**: 页面所有输入框的详细信息（标签、类型、名称、ID、类名、占位符、可见性等）
 
 ## 🎨 架构特点
 
@@ -736,12 +769,12 @@ npm start
 #### 4. 打包发布
 
 ```bash
-# 复制后端代码到打包目录
-cp -r node-mcp-backend electron-react-mcp/node-backend/
+# 使用一键打包脚本
+./build-package.sh --mac
 
-# 生成安装包
+# 或手动打包
 cd electron-react-mcp
-npm run dist
+npm run dist:mac
 ```
 
 ### 调整 AI 提示词
@@ -816,12 +849,9 @@ pkill -f "electron"
 #### 2. 后端代码未更新
 
 ```bash
-# 开发模式:确保依赖安装成功
-cd node-mcp-backend
+# 确保依赖安装成功
+cd electron-react-mcp/node-backend
 npm install
-
-# 打包模式:确保复制到正确位置
-cp -r node-mcp-backend ../electron-react-mcp/node-backend/
 ```
 
 #### 3. 打包后无法启动
