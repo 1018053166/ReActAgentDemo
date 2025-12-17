@@ -11,65 +11,59 @@
 
 ```mermaid
 graph TB
-    subgraph electron["Electron 客户端（原生开发）"]
-        UI["React UI<br/>控制面板（30%左侧）"]
-        BV["BrowserView<br/>浏览器视图（70%右侧）"]
-        Main["Main Process<br/>主进程 + 子进程管理"]
-        Preload["Preload Script<br/>预加载脚本"]
-        Remote["Remote Control<br/>HTTP Server :9222"]
+    subgraph electron[Electron 客户端]
+        UI[React UI 控制面板]
+        BV[BrowserView 浏览器视图]
+        Main[Main Process 主进程]
+        Preload[Preload Script]
+        Remote[Remote Control 9222]
     end
-    
-    subgraph nodejs["Node.js 后端（子进程）"]
-        API["Express Server<br/>:8080"]
-        ReAct["ReAct Agent<br/>自定义实现"]
-        Qwen["Qwen AI Model<br/>qwen-turbo"]
-        Tools["Tool Registry<br/>工具注册中心"]
-        PlaywrightTools["Playwright Tools<br/>浏览器自动化"]
-        MathTools["Math Tools<br/>数学计算"]
-        FileTools["File Tools<br/>文件操作"]
+    subgraph nodejs[Node.js 后端]
+        API[Express Server 8080]
+        ReAct[ReAct Agent]
+        Qwen[Qwen AI Model]
+        Tools[Tool Registry]
+        PlaywrightTools[Playwright Tools]
+        MathTools[Math Tools]
+        FileTools[File Tools]
     end
-    
-    User(("用户")) --> UI
-    UI -->|"IPC"| Main
-    UI -->|"HTTP/SSE"| API
-    Main -->|"spawn('node')"| API
-    Main -->|"控制"| BV
-    API -->|"流式输出"| UI
+    User((用户)) --> UI
+    UI --> Main
+    UI --> API
+    Main --> API
+    Main --> BV
+    API --> UI
     API --> ReAct
     ReAct --> Qwen
     ReAct --> Tools
     Tools --> PlaywrightTools
     Tools --> MathTools
     Tools --> FileTools
-    PlaywrightTools -->|"HTTP :9222"| Remote
-    Remote -->|"BrowserView API"| BV
+    PlaywrightTools --> Remote
+    Remote --> BV
 ```
 
 ### Electron 客户端分层架构
 
 ```mermaid
 graph TD
-    subgraph UI["表现层"]
-        A["React UI 控制面板<br/>任务输入、执行日志、案例按钮"]
-        B["BrowserView 浏览器<br/>独立渲染进程、DevTools"]
+    subgraph UI[表现层]
+        A[React UI 控制面板]
+        B[BrowserView 浏览器]
     end
-    
-    subgraph IPC["进程间通信层"]
-        C["IPC Communication<br/>ipcMain.handle"]
-        D["Preload Bridge<br/>contextBridge"]
+    subgraph IPC[进程通信层]
+        C[IPC Communication]
+        D[Preload Bridge]
     end
-    
-    subgraph Main["主进程层"]
-        E["Main Process<br/>窗口管理"]
-        F["Node.js Launcher<br/>端口检测、spawn"]
-        G["Remote Server<br/>HTTP :9222"]
+    subgraph Main[主进程层]
+        E[Main Process]
+        F[Node.js Launcher]
+        G[Remote Server 9222]
     end
-    
-    subgraph Resources["资源层"]
-        H["Node.js 后端<br/>server.js"]
-        I["React UI Build<br/>index.html"]
+    subgraph Resources[资源层]
+        H[Node.js 后端]
+        I[React UI Build]
     end
-    
     A --> D
     B --> G
     D --> C
@@ -85,26 +79,21 @@ graph TD
 ```mermaid
 sequenceDiagram
     participant User as 用户
-    participant UI as React UI<br/>(渲染进程)
-    participant Preload as Preload Script<br/>(隔离层)
-    participant Main as Main Process<br/>(主进程)
-    participant NodeBackend as Node.js Backend<br/>(子进程)
-    
+    participant UI as React UI
+    participant Preload as Preload Script
+    participant Main as Main Process
+    participant NodeBackend as Node.js Backend
     User->>UI: 1. 输入任务
-    UI->>Preload: 2. window.electronAPI.invoke('get-service-info')
-    Preload->>Main: 3. ipcMain.handle('get-service-info')
+    UI->>Preload: 2. invoke get-service-info
+    Preload->>Main: 3. ipcMain.handle
     Main->>Main: 4. 检测后端服务状态
-    Main-->>Preload: 5. return {running: true, type: 'nodejs'}
+    Main-->>Preload: 5. return running
     Preload-->>UI: 6. Promise resolve
-    
-    UI->>NodeBackend: 7. HTTP GET /react/solve-stream?task=...
+    UI->>NodeBackend: 7. HTTP GET /react/solve-stream
     NodeBackend-->>UI: 8. SSE 流式响应
-    
-    Note over UI,NodeBackend: 前后端通过 HTTP 通信<br/>主进程与渲染进程通过 IPC 通信
-    
     NodeBackend->>Main: 9. HTTP POST /browser/navigate
-    Main->>Main: 10. BrowserView.loadURL()
-    Main-->>NodeBackend: 11. {success: true}
+    Main->>Main: 10. BrowserView.loadURL
+    Main-->>NodeBackend: 11. success
 ```
 
 ### Electron 安装与执行逻辑
@@ -113,29 +102,21 @@ sequenceDiagram
 graph TD
     A[用户双击 DMG 安装包] --> B[拖拽到 Applications]
     B --> C[首次启动 .app]
-    
     C --> D[Main Process 启动]
     D --> E[动态 import 后端模块]
-    
     E --> F{Node.js 文件路径判断}
-    
-    F -->|开发模式<br/>isDev=true| G[加载 ./node-backend/src/server.js]
-    F -->|打包模式<br/>isDev=false| H[加载 app.asar.unpacked/node-backend/src/server.js]
-    
-    G --> I[调用 startServer() 启动服务]
+    F -->|开发模式| G[加载 node-backend/src/server.js]
+    F -->|打包模式| H[加载 app.asar.unpacked]
+    G --> I[调用 startServer 启动服务]
     H --> I
     I --> L[后端服务就绪]
-    
     L --> M[创建主窗口 BrowserWindow]
     M --> N{UI 文件路径判断}
-    
     N -->|开发模式| O[加载 react-ui/public/index.html]
-    N -->|打包模式| P[加载 process.resourcesPath/react-ui/build/index.html]
-    
-    O --> Q[创建 BrowserView<br/>]
+    N -->|打包模式| P[加载 resourcesPath/react-ui/build]
+    O --> Q[创建 BrowserView]
     P --> Q
-    
-    Q --> R[启动远程控制服务器 :9222]
+    Q --> R[启动远程控制服务器 9222]
     R --> S[通知渲染进程服务就绪]
     S --> T[应用启动完成]
 ```

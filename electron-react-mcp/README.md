@@ -143,25 +143,23 @@ electron-react-mcp/
 ```mermaid
 graph TB
     subgraph Electron客户端
-        A[Main Process<br/>main.js] --> B[BrowserWindow<br/>左侧30%控制面板]
-        A --> C[BrowserView<br/>右侧70%浏览器]
-        A --> D[远程控制服务<br/>端口9222]
+        A[Main Process] --> B[BrowserWindow 控制面板]
+        A --> C[BrowserView 浏览器]
+        A --> D[远程控制服务 9222]
     end
-    
     subgraph Node.js后端
         E[ReAct Agent] --> F[Tool Registry]
-        F --> G[浏览器工具<br/>6个]
-        F --> H[命令工具<br/>2个]
-        F --> I[文件工具<br/>5个]
-        F --> J[数学工具<br/>5个]
-        F --> K[文档工具<br/>2个]
-        E --> L[Task Memory<br/>任务记忆]
-        E --> M[Qwen LLM<br/>通义千问]
+        F --> G[浏览器工具]
+        F --> H[命令工具]
+        F --> I[文件工具]
+        F --> J[数学工具]
+        F --> K[文档工具]
+        E --> L[Task Memory]
+        E --> M[Qwen LLM]
     end
-    
-    B -- IPC --> A
-    B -- HTTP:8080 --> E
-    G -- HTTP:9222 --> D
+    B --> A
+    B --> E
+    G --> D
     D --> C
 ```
 
