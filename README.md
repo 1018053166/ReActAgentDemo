@@ -11,35 +11,25 @@
 
 ```mermaid
 graph TB
-    subgraph electron[Electron 客户端]
+    subgraph electron[Electron 主进程]
+        Main[Main Process]
         UI[React UI 控制面板]
-        BV[BrowserView 浏览器视图]
-        Main[Main Process 主进程]
+        BV[BrowserView 浏览器]
         Preload[Preload Script]
-        Remote[Remote Control 9222]
-    end
-    subgraph nodejs[Node.js 后端]
-        API[Express Server 8080]
+        Remote[Playwright 控制服务 9222]
+        Backend[Node.js 后端 8080]
         ReAct[ReAct Agent]
-        Qwen[Qwen AI Model]
+        Qwen[Qwen AI]
         Tools[Tool Registry]
-        PlaywrightTools[Playwright Tools]
-        MathTools[Math Tools]
-        FileTools[File Tools]
     end
     User((用户)) --> UI
     UI --> Main
-    UI --> API
-    Main --> API
+    UI --> Backend
     Main --> BV
-    API --> UI
-    API --> ReAct
+    Backend --> ReAct
     ReAct --> Qwen
     ReAct --> Tools
-    Tools --> PlaywrightTools
-    Tools --> MathTools
-    Tools --> FileTools
-    PlaywrightTools --> Remote
+    Tools --> Remote
     Remote --> BV
 ```
 
@@ -47,31 +37,21 @@ graph TB
 
 ```mermaid
 graph TD
-    subgraph UI[表现层]
-        A[React UI 控制面板]
-        B[BrowserView 浏览器]
+    subgraph Main[主进程]
+        A[Main Process]
+        B[Node.js 后端 8080]
+        C[Playwright 控制 9222]
     end
-    subgraph IPC[进程通信层]
-        C[IPC Communication]
-        D[Preload Bridge]
+    subgraph UI[渲染进程]
+        D[React UI 控制面板]
+        E[BrowserView 浏览器]
     end
-    subgraph Main[主进程层]
-        E[Main Process]
-        F[Node.js Launcher]
-        G[Remote Server 9222]
-    end
-    subgraph Resources[资源层]
-        H[Node.js 后端]
-        I[React UI Build]
-    end
+    A --> B
+    A --> C
     A --> D
-    B --> G
-    D --> C
+    A --> E
+    D --> B
     C --> E
-    E --> F
-    E --> G
-    F --> H
-    E --> I
 ```
 
 ### IPC 通信流程
@@ -80,20 +60,17 @@ graph TD
 sequenceDiagram
     participant User as 用户
     participant UI as React UI
-    participant Preload as Preload Script
     participant Main as Main Process
-    participant NodeBackend as Node.js Backend
+    participant Backend as Node.js Backend
+    participant BV as BrowserView
     User->>UI: 1. 输入任务
-    UI->>Preload: 2. invoke get-service-info
-    Preload->>Main: 3. ipcMain.handle
-    Main->>Main: 4. 检测后端服务状态
-    Main-->>Preload: 5. return running
-    Preload-->>UI: 6. Promise resolve
-    UI->>NodeBackend: 7. HTTP GET /react/solve-stream
-    NodeBackend-->>UI: 8. SSE 流式响应
-    NodeBackend->>Main: 9. HTTP POST /browser/navigate
-    Main->>Main: 10. BrowserView.loadURL
-    Main-->>NodeBackend: 11. success
+    UI->>Backend: 2. HTTP /react/solve-stream
+    Backend->>Backend: 3. ReAct 推理循环
+    Backend->>Main: 4. HTTP /browser/navigate
+    Main->>BV: 5. Playwright 操作
+    BV-->>Main: 6. 操作结果
+    Main-->>Backend: 7. 返回结果
+    Backend-->>UI: 8. SSE 流式响应
 ```
 
 ### Electron 安装与执行逻辑
