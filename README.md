@@ -43,10 +43,6 @@ graph TB
     Tools --> FileTools
     PlaywrightTools -->|"HTTP :9222"| Remote
     Remote -->|"BrowserView API"| BV
-    
-    style electron fill:#e1f5ff
-    style nodejs fill:#c8e6c9
-    style User fill:#f0f0f0
 ```
 
 ### Electron 客户端分层架构
@@ -82,11 +78,6 @@ graph TD
     E --> G
     F --> H
     E --> I
-    
-    style UI fill:#e8f5e9
-    style IPC fill:#fff3e0
-    style Main fill:#e3f2fd
-    style Resources fill:#f3e5f5
 ```
 
 ### IPC 通信流程
@@ -146,12 +137,7 @@ graph TD
     
     Q --> R[启动远程控制服务器 :9222]
     R --> S[通知渲染进程服务就绪]
-    S --> T[✅ 应用启动完成]
-    
-    style A fill:#e8f5e9
-    style T fill:#c8e6c9
-    style F fill:#fff9c4
-    style H fill:#ffe0b2
+    S --> T[应用启动完成]
 ```
 
 ### 打包后的文件结构

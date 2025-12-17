@@ -163,10 +163,6 @@ graph TB
     B -- HTTP:8080 --> E
     G -- HTTP:9222 --> D
     D --> C
-    
-    style A fill:#e1f5ff
-    style E fill:#fff3e0
-    style M fill:#f3e5f5
 ```
 
 ### 工作流程
